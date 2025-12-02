@@ -76,6 +76,17 @@ python -m AutoInterp --projects-dir /absolute/or/relative/path
 interp-agent --help
 ```
 
+### Sandboxed Execution with Docker
+
+- Enable the sandbox by setting `analysis.execution.sandbox: true` (default) in `config.yaml`. When enabled, AutoInterp runs generated analysis scripts inside a Docker container instead of directly on the host.
+- Configure the container under `execution.docker`:
+  - `image`: base image to run (defaults to `python:3.10-slim`; swap for GPU-enabled images such as `pytorch/pytorch:latest` if needed).
+  - `use_gpu`: set to `true` to pass through GPUs via `--gpus all` (requires the NVIDIA Container Toolkit).
+  - `cache_dir`: persistent host directory where Python packages are installed once and reused across runs.
+  - `extra_args`: additional `docker run` flags (for custom networks, resource limits, etc.).
+  - `env`: additional environment variables to propagate into the container.
+- Hugging Face, pip, and torch caches are mounted automatically so downloads persist between runs. Project artifacts remain on the host because the project directory is bind-mounted read/write.
+
 
 ## Directory Structure
 ```

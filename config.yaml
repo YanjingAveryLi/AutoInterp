@@ -53,6 +53,12 @@ execution:
   use_existing_venv: true  # Set to true to use an existing virtual environment  
   existing_venv_path: "/home/akozlo/miniconda3/envs/akpy25"  # Path to existing virtual environment
   fail_on_max_retries: false  # If true, shutdown entire system when max_retries exceeded; if false, continue to next analysis
+  docker:
+    image: "python:3.10-slim"  # Default container image for sandbox execution
+    use_gpu: false             # Set true to pass host GPUs into the container (requires nvidia-container-runtime)
+    cache_dir: "~/.autointerp/docker_cache"  # Persistent cache for installed packages
+    extra_args: []             # Additional docker run arguments
+    env: []                    # Additional environment variables to pass through (e.g., ["CUSTOM_ENV"])
 
 # Visualization settings
 visualization:

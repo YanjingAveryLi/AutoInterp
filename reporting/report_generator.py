@@ -1778,7 +1778,7 @@ plt.show()
                 return study_name
         
         # Fallback: use the whole project_id or a default name
-        if project_id and project_id != "working_project":
+        if project_id and not project_id.startswith("working_project"):
             return project_id
         else:
             # Last resort: try to extract from config title

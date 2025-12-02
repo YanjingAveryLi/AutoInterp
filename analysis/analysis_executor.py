@@ -11,11 +11,13 @@ import time
 import asyncio
 import traceback
 import re  # For parsing TXT files
+import shutil
 from pathlib import Path
-from typing import Dict, List, Any, Optional, Union
+from typing import Dict, List, Any, Optional, Union, Tuple
 import logging
 import subprocess
 import io
+import textwrap
 
 from ..core.utils import (
     get_timestamp,
@@ -23,7 +25,8 @@ from ..core.utils import (
     install_requirements,
     execute_in_virtual_env,
     PathResolver,
-    clean_code_content
+    clean_code_content,
+    ensure_directory
 )
 
 class AnalysisExecutor:
@@ -101,6 +104,50 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
         
         # Set env_path to None initially - we'll set it up on first use
         self.env_path = None
+
+        # Docker sandbox configuration
+        analysis_execution = config.get("analysis", {}).get("execution", {})
+        self.sandbox_enabled = bool(analysis_execution.get("sandbox")) and self.execution_mode == "sandbox"
+        docker_settings = config.get("execution", {}).get("docker", {})
+        self.docker_image = docker_settings.get("image", "python:3.10-slim")
+        self.docker_extra_args = docker_settings.get("extra_args", [])
+        self.docker_use_gpu = docker_settings.get("use_gpu", False)
+        self.docker_env_passthrough = docker_settings.get("env", [])
+        cache_root_default = Path.home() / ".autointerp" / "docker_cache"
+        self.docker_cache_root = Path(docker_settings.get("cache_dir", cache_root_default)).expanduser().resolve()
+        self.docker_cache_root.mkdir(parents=True, exist_ok=True)
+        self.docker_requirements_target = self.docker_cache_root / "site-packages"
+        self.docker_requirements_target.mkdir(parents=True, exist_ok=True)
+        self.docker_requirements_sentinel = self.docker_cache_root / "requirements_installed.flag"
+        self.repo_root = Path(__file__).resolve().parents[1]
+        self.host_home = Path.home().resolve()
+        self.hf_cache_dir = Path(os.environ.get("HF_HOME", self.host_home / ".cache" / "huggingface")).resolve()
+        self.transformers_cache_dir = Path(os.environ.get("TRANSFORMERS_CACHE", self.hf_cache_dir)).resolve()
+        self.pip_cache_dir = Path(os.environ.get("PIP_CACHE_DIR", self.host_home / ".cache" / "pip")).resolve()
+        self.torch_cache_dir = Path(os.environ.get("TORCH_HOME", self.host_home / ".cache" / "torch")).resolve()
+        requirements_config_path = config.get("paths", {}).get("requirements")
+        if requirements_config_path:
+            req_path = Path(requirements_config_path)
+            if not req_path.is_absolute():
+                req_path = (self.repo_root / req_path).resolve()
+        else:
+            req_path = self.repo_root / "requirements.txt"
+        self.requirements_file = req_path.resolve()
+        self.logger.info(
+            f"AnalysisExecutor requirements file set to: {self.requirements_file} "
+            f"(exists={self.requirements_file.exists()})"
+        )
+        
+        if self.sandbox_enabled:
+            docker_path = shutil.which("docker")
+            if not docker_path:
+                msg = (
+                    "Docker executable not found but sandbox mode is enabled. "
+                    "Install Docker or disable sandbox execution in config.yaml."
+                )
+                self.logger.critical(msg)
+                raise RuntimeError(msg)
+            self.logger.info(f"Docker sandbox enabled using image: {self.docker_image}")
         
     def _get_error_data(self, execution_dir: Path) -> Optional[Dict[str, str]]:
         """
@@ -297,6 +344,345 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
             self.logger.warning(f"Error collecting visualization files from {script_dir}: {e}")
         
         return visualization_files
+    
+    def _build_docker_wrapper_script(self,
+                                     script_path: Path,
+                                     parameters: Optional[Dict[str, Any]] = None) -> str:
+        """
+        Create the Python wrapper script that will run inside the Docker container.
+        
+        Args:
+            script_path: Path to the original generated analysis script
+            parameters: Optional parameters passed to the script
+            
+        Returns:
+            Wrapper script content as a string
+        """
+        parameters_json = json.dumps(parameters or {})
+        requirements_file = str(self.requirements_file.resolve()) if self.requirements_file.exists() else ""
+        
+        standard_imports_literal = json.dumps(self.STANDARD_IMPORTS)
+        wrapper = f"""import sys
+import io
+import os
+import subprocess
+import json
+from contextlib import redirect_stdout, redirect_stderr
+
+CACHE_DIR = os.environ.get("AUTOINTERP_DOCKER_CACHE", "/autointerp_cache")
+PIP_TARGET = os.environ.get("AUTOINTERP_PIP_TARGET", os.path.join(CACHE_DIR, "site-packages"))
+REQUIREMENTS_SENTINEL = os.environ.get("AUTOINTERP_REQUIREMENTS_SENTINEL")
+REQUIREMENTS_FILE = os.environ.get("AUTOINTERP_REQUIREMENTS_FILE", "{requirements_file}")
+
+def _ensure_pythonpath():
+    if PIP_TARGET and PIP_TARGET not in sys.path:
+        sys.path.insert(0, PIP_TARGET)
+
+def _install_requirements():
+    if not REQUIREMENTS_FILE or not os.path.exists(REQUIREMENTS_FILE):
+        print("[AUTOINTERP-DOCKER] Requirements file missing or not set: " + str(REQUIREMENTS_FILE), flush=True)
+        return
+    
+    os.makedirs(PIP_TARGET, exist_ok=True)
+    print("[AUTOINTERP-DOCKER] Installing requirements into " + str(PIP_TARGET), flush=True)
+    try:
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "--upgrade", "pip"], stdout=sys.stdout, stderr=sys.stderr)
+    except Exception:
+        # Non-fatal - continue with existing pip version
+        pass
+    
+    install_cmd = [
+        sys.executable, "-m", "pip", "install",
+        "-r", REQUIREMENTS_FILE,
+        "--target", PIP_TARGET
+    ]
+    print("[AUTOINTERP-DOCKER] Running pip install command: " + str(install_cmd), flush=True)
+    subprocess.check_call(install_cmd, stdout=sys.stdout, stderr=sys.stderr)
+    
+    if REQUIREMENTS_SENTINEL:
+        with open(REQUIREMENTS_SENTINEL, "w") as sentinel_file:
+            sentinel_file.write("ok")
+    try:
+        installed = os.listdir(PIP_TARGET)
+        print("[AUTOINTERP-DOCKER] PIP_TARGET contents after install: " + str(installed), flush=True)
+    except Exception as list_exc:
+        print("[AUTOINTERP-DOCKER] Unable to list PIP_TARGET: " + str(list_exc), flush=True)
+
+def prepare_environment():
+    _ensure_pythonpath()
+    if REQUIREMENTS_SENTINEL and os.path.exists(REQUIREMENTS_SENTINEL):
+        return
+    
+    try:
+        _install_requirements()
+    except Exception as install_exc:
+        # Ensure sentinel is removed if installation fails
+        if REQUIREMENTS_SENTINEL and os.path.exists(REQUIREMENTS_SENTINEL):
+            try:
+                os.remove(REQUIREMENTS_SENTINEL)
+            except OSError:
+                pass
+        raise install_exc
+
+
+def main():
+    prepare_environment()
+    _ensure_pythonpath()
+    try:
+        import importlib
+        importlib.import_module("numpy")
+    except Exception as debug_exc:
+        print("[AUTOINTERP-DOCKER] numpy import failed before executing script: " + str(debug_exc), file=sys.stderr)
+        print("[AUTOINTERP-DOCKER] sys.path: " + str(sys.path), file=sys.stderr)
+        raise
+    
+    script_path = r"{str(script_path)}"
+    stdout_capture = io.StringIO()
+    stderr_capture = io.StringIO()
+    
+    with open(script_path, 'r') as f:
+        script_content = f.read()
+    
+    STANDARD_IMPORTS = {standard_imports_literal}
+    script_content = STANDARD_IMPORTS + "\\n" + script_content
+    
+    script_content = script_content.replace('```python', '')
+    script_content = script_content.replace('```', '')
+    
+    script_dir = os.path.dirname(os.path.abspath(script_path))
+    if script_dir and script_dir not in sys.path:
+        sys.path.insert(0, script_dir)
+    
+    globals_dict = {{"__file__": script_path, "__name__": "__main__", "parameters": {parameters_json}}}
+    
+    with redirect_stdout(stdout_capture), redirect_stderr(stderr_capture):
+        exec(script_content, globals_dict)
+        sys.stdout.flush()
+        sys.stderr.flush()
+    
+    print(stdout_capture.getvalue())
+    if stderr_capture.getvalue():
+        print(stderr_capture.getvalue(), file=sys.stderr)
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except Exception as exc:
+        import traceback
+        tb = traceback.format_exc()
+        print(f"Error: {{str(exc)}}", file=sys.stderr)
+        print(tb, file=sys.stderr)
+        sys.exit(1)
+"""
+        return textwrap.dedent(wrapper)
+    
+    def _gather_docker_env(self) -> List[str]:
+        """
+        Gather environment variable flags for Docker execution.
+        
+        Returns:
+            List of -e ENV=value entries
+        """
+        hf_home = os.environ.get("HF_HOME", str(self.hf_cache_dir))
+        transformers_cache = os.environ.get("TRANSFORMERS_CACHE", hf_home)
+        huggingface_hub_cache = os.environ.get("HUGGINGFACE_HUB_CACHE", hf_home)
+        env_names = {
+            "HF_HOME",
+            "TRANSFORMERS_CACHE",
+            "HUGGINGFACE_HUB_CACHE",
+            "HF_TOKEN",
+            "HUGGINGFACEHUB_API_TOKEN",
+            "OPENAI_API_KEY",
+            "OPENROUTER_API_KEY",
+            "ANTHROPIC_API_KEY",
+            "CUDA_VISIBLE_DEVICES",
+        }
+        env_names.update(self.docker_env_passthrough)
+        
+        env_flags: List[str] = []
+        critical_envs = {
+            "HF_HOME": hf_home,
+            "TRANSFORMERS_CACHE": transformers_cache,
+            "HUGGINGFACE_HUB_CACHE": huggingface_hub_cache,
+        }
+        for key, value in critical_envs.items():
+            env_flags.extend(["-e", f"{key}={value}"])
+            env_names.discard(key)
+        for name in env_names:
+            if name in os.environ:
+                env_flags.extend(["-e", f"{name}={os.environ[name]}"])
+        
+        env_flags.extend([
+            "-e", f"AUTOINTERP_DOCKER_CACHE={self.docker_cache_root}",
+            "-e", f"AUTOINTERP_PIP_TARGET={self.docker_requirements_target}",
+            "-e", f"AUTOINTERP_REQUIREMENTS_SENTINEL={self.docker_requirements_sentinel}",
+            "-e", f"AUTOINTERP_REQUIREMENTS_FILE={self.requirements_file.resolve()}",
+        ])
+        
+        pythonpath_entries = []
+        if "PYTHONPATH" in os.environ and os.environ["PYTHONPATH"]:
+            pythonpath_entries.append(os.environ["PYTHONPATH"])
+        pythonpath_entries.append(str(self.docker_requirements_target))
+        pythonpath_entries.append(str(self.repo_root))
+        env_flags.extend(["-e", f"PYTHONPATH={os.pathsep.join(pythonpath_entries)}"])
+        
+        return env_flags
+    
+    def _gather_docker_volumes(self, script_dir: Path) -> List[str]:
+        """
+        Collect volume mounts for docker run invocation.
+        
+        Args:
+            script_dir: Directory containing the script to run
+            
+        Returns:
+            List of -v volume specifications
+        """
+        volumes = set()
+        resolved_script_dir = script_dir.resolve()
+        resolved_project_dir = self.path_resolver.get_project_dir().resolve()
+        ensure_directory(resolved_project_dir)
+        resolved_repo_root = self.repo_root.resolve()
+        
+        volumes.add(f"{resolved_project_dir}:{resolved_project_dir}")
+        volumes.add(f"{resolved_script_dir}:{resolved_script_dir}")
+        if resolved_repo_root.exists():
+            volumes.add(f"{resolved_repo_root}:{resolved_repo_root}:ro")
+        
+        # Cache directories
+        cache_dirs = {
+            self.hf_cache_dir,
+            self.transformers_cache_dir,
+            self.pip_cache_dir,
+            self.torch_cache_dir,
+            self.docker_cache_root,
+        }
+        
+        for cache_dir in cache_dirs:
+            cache_dir.mkdir(parents=True, exist_ok=True)
+            volumes.add(f"{cache_dir}:{cache_dir}")
+        
+        volume_flags: List[str] = []
+        for volume in sorted(volumes):
+            volume_flags.extend(["-v", volume])
+        
+        return volume_flags
+    
+    def _build_docker_command(self,
+                              script_dir: Path,
+                              wrapper_name: str,
+                              prefer_gpu: bool = True) -> Tuple[List[str], bool]:
+        """
+        Construct the docker run command for executing the wrapper script.
+        
+        Args:
+            script_dir: Directory containing the generated script and wrapper
+            wrapper_name: Name of the wrapper script file
+            prefer_gpu: Whether to attempt GPU pass-through
+            
+        Returns:
+            Tuple of (docker command list, gpu_enabled flag)
+        """
+        cmd: List[str] = ["docker", "run", "--rm"]
+        cmd.extend(["-w", str(script_dir.resolve())])
+        
+        # Run as current user when possible to avoid root-owned artifacts
+        if hasattr(os, "getuid"):
+            cmd.extend(["--user", f"{os.getuid()}:{os.getgid()}"])
+        
+        gpu_requested = prefer_gpu and (self.docker_use_gpu or bool(os.environ.get("CUDA_VISIBLE_DEVICES")))
+        gpu_enabled = False
+        if gpu_requested:
+            cmd.extend(["--gpus", "all"])
+            gpu_enabled = True
+        
+        cmd.extend(self.docker_extra_args)
+        cmd.extend(self._gather_docker_env())
+        cmd.extend(self._gather_docker_volumes(script_dir))
+        cmd.append(self.docker_image)
+        cmd.extend(["python", "-u", wrapper_name])
+        return cmd, gpu_enabled
+    
+    async def _execute_in_docker(self,
+                                 script_path: Path,
+                                 parameters: Optional[Dict[str, Any]] = None,
+                                 execution_type: str = "analysis") -> Dict[str, Any]:
+        """
+        Execute the generated script inside a Docker container.
+        
+        Args:
+            script_path: Path to the generated analysis script
+            parameters: Optional parameters for the script
+            execution_type: Type of execution ("analysis" or "visualization")
+            
+        Returns:
+            Dictionary with execution results
+        """
+        script_path = script_path.resolve()
+        script_dir = script_path.parent
+        os.makedirs(script_dir, exist_ok=True)
+        
+        wrapper_name = "__autointerp_wrapper.py"
+        wrapper_path = script_dir / wrapper_name
+        
+        wrapper_code = self._build_docker_wrapper_script(script_path, parameters)
+        wrapper_path.write_text(wrapper_code, encoding="utf-8")
+        
+        docker_cmd, gpu_enabled = self._build_docker_command(script_dir, wrapper_name, prefer_gpu=True)
+        self.logger.info(f"Executing {execution_type} script in Docker: {' '.join(docker_cmd)}")
+        
+        try:
+            process = await asyncio.create_subprocess_exec(
+                *docker_cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            stdout_bytes, stderr_bytes = await process.communicate()
+            stdout = stdout_bytes.decode("utf-8", errors="replace")
+            stderr = stderr_bytes.decode("utf-8", errors="replace")
+            return_code = process.returncode
+            
+            # Retry without GPU if the GPU flag caused the failure
+            gpu_error_signatures = [
+                "could not select device driver",
+                "unknown flag: --gpus",
+                "no CUDA-capable device is detected"
+            ]
+            if return_code != 0 and gpu_enabled and any(sig in stderr for sig in gpu_error_signatures):
+                self.logger.warning("Docker execution failed with GPU enabled, retrying without GPU access")
+                retry_cmd, _ = self._build_docker_command(script_dir, wrapper_name, prefer_gpu=False)
+                process = await asyncio.create_subprocess_exec(
+                    *retry_cmd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE
+                )
+                stdout_bytes, stderr_bytes = await process.communicate()
+                stdout = stdout_bytes.decode("utf-8", errors="replace")
+                stderr = stderr_bytes.decode("utf-8", errors="replace")
+                return_code = process.returncode
+            
+            with open(script_dir / "stdout.txt", "w", encoding="utf-8") as stdout_file:
+                stdout_file.write(stdout)
+            with open(script_dir / "stderr.txt", "w", encoding="utf-8") as stderr_file:
+                stderr_file.write(stderr)
+            
+            return {
+                "success": return_code == 0,
+                "return_code": return_code,
+                "stdout": stdout,
+                "stderr": stderr,
+                "output": stdout,
+                "error": stderr if return_code != 0 else None,
+                "results": {"stdout": stdout},
+                "script_path": str(script_path)
+            }
+        finally:
+            try:
+                if wrapper_path.exists():
+                    wrapper_path.unlink()
+            except Exception as cleanup_exc:
+                self.logger.warning(f"Failed to remove temporary wrapper script: {cleanup_exc}")
         
     def setup_virtual_environment(self):
         """
@@ -531,10 +917,7 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
         self.env_path = env_path
         
         # Install required packages in the virtual environment
-        requirements_file = Path(self.config.get("paths", {}).get(
-            "requirements", 
-            Path(__file__).resolve().parents[2] / "requirements.txt"
-        ))
+        requirements_file = self.requirements_file
         
         print(f"[AUTOINTERP] Installing required packages in virtual environment...")
         self.logger.info(f"Installing required packages in virtual environment...")
@@ -660,7 +1043,10 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
         # Execute the script directly without creating duplicate files
         start_time = time.time()
         try:
-            results = await self._execute_script_directly(script_path, parameters, execution_type)
+            if self.sandbox_enabled:
+                results = await self._execute_in_docker(script_path, parameters, execution_type)
+            else:
+                results = await self._execute_script_directly(script_path, parameters, execution_type)
         except Exception as e:
             execution_time = time.time() - start_time
             return {

@@ -300,7 +300,7 @@ async def initialize_framework(
         sys.exit(1)
     
     # STEP 1: Always use a fixed working project ID at startup. Name will be updated after question selection
-    project_id = "working_project"
+    project_id = f"working_project_{get_timestamp('%Y%m%dT%H%M%S')}"
     
     # Set the project_id in config so it's immediately available everywhere
     config["project_id"] = project_id
