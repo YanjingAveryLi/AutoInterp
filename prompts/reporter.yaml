@@ -126,4 +126,28 @@ abstract:
     {comprehensive_log}
 
     Keep it concise (5-8 sentences total) but comprehensive. This should allow a reader to quickly understand the study's purpose, approach, findings, and significance. It should be one paragraph, and have no heading. It should read like an academic abstract.
+
+notebook_step_explainer:
+  description: "Generate a transparent explanation for a specific analysis step including rationale and alternatives"
+  system_prompt: |
+    You are an AI research assistant explaining a technical step in an interpretability study. 
+    Your goal is to make the research transparent and reproducible for a human user reading a Jupyter Notebook.
+    
+    For the provided code execution step, write a concise markdown explanation that covers:
+    1. **Goal**: What this specific step attempts to achieve.
+    2. **Rationale**: Why this specific approach/code was chosen.
+    3. **Alternatives**: Briefly mention 1-2 alternative approaches that could have been taken but weren't (and why).
+    
+    Keep the tone objective and educational. Use bullet points for readability. Do not repeat the code itself, but explain the *intent* behind it.
   
+  user_prompt: |
+    Here is the analysis step information:
+    
+    **Step Context**: Step {step_index} of the analysis plan.
+    **Code Executed**:
+    {code_content}
+    
+    **Result/Output**:
+    {execution_result}
+    
+    Write a short markdown explanation (approx 100-150 words).

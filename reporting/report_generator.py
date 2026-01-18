@@ -13,6 +13,7 @@ import logging
 import markdown
 import nbformat
 from nbformat.v4 import new_notebook, new_markdown_cell, new_code_cell
+
 try:
     import weasyprint
     WEASYPRINT_AVAILABLE = True
@@ -1724,7 +1725,157 @@ plt.show()
                 return str(fallback_path)
             else:
                 raise Exception(f"PDF summary generation failed and no fallback available: {e}")
-    
+        
+    async def generate_jupyter_notebook(self, 
+                                        question: Union[str, Dict[str, Any]],
+                                        analysis_results: Dict[str, Any],
+                                        evaluation_results: Dict[str, Any],
+                                        visualizations: Dict[str, str],
+                                        title: Optional[str] = None,
+                                        output_path: Optional[Path] = None) -> Path:
+            """
+            Generates a reproducible Jupyter notebook (.ipynb) with transparent step-by-step explanations.
+            """
+            if output_path is None:
+                raise ValueError("output_path must be provided")
+
+            # Initialize notebook
+            nb = new_notebook()
+            
+            # 1. Title and Introduction
+            display_title = title or "AutoInterp Analysis Report"
+            # Handle question if it's a dict
+            question_text = question.get("text", str(question)) if isinstance(question, dict) else str(question)
+            
+            nb.cells.append(new_markdown_cell(f"# {display_title}\n\n**Research Question:** {question_text}"))
+            nb.cells.append(new_markdown_cell("## Introduction\nThis notebook documents the step-by-step analysis performed. It is generated automatically to ensure transparency and reproducibility."))
+            
+            # 2. Setup/Imports Cell
+            setup_code = """import os
+import sys
+import json
+import torch
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+from pathlib import Path
+# Setup basic configuration
+%matplotlib inline
+print("Environment setup complete.")
+"""
+            nb.cells.append(new_code_cell(setup_code))
+            
+            # 3. Process Analysis Steps Chronologically
+            analyses = analysis_results.get("analyses", [])
+            print(f"analyses length: {len(analyses)}")
+            successful_steps = [a for a in analyses if a.get("status") == "success"]
+            print(f"num successful steps: {len(successful_steps)}")
+            if len(successful_steps) == 0:
+                successful_steps = analyses
+            
+            for i, step in enumerate(successful_steps, 1):
+                code_content = step.get("code", "")
+                
+                # Handle results (could be dict or str depending on executor)
+                raw_result = step.get("results", "")
+                if isinstance(raw_result, dict):
+                    result_output = raw_result.get("stdout", "") or str(raw_result)
+                else:
+                    result_output = str(raw_result)
+                
+                # Skip empty steps
+                if not code_content.strip():
+                    continue
+                    
+                # Generate Explanation via LLM
+                explanation = await self._generate_step_explanation(i, code_content, result_output)
+                
+                # Add Explanation Markdown
+                nb.cells.append(new_markdown_cell(explanation))
+                
+                # Add Code Cell
+                nb.cells.append(new_code_cell(code_content))
+                
+                # Add Output Summary (Truncated)
+                if result_output:
+                    trunc_out = result_output[:1000] + "\n... [Output Truncated]" if len(result_output) > 1000 else result_output
+                    nb.cells.append(new_markdown_cell(f"**Output from execution:**\n```text\n{trunc_out}\n```"))
+
+            # 4. Evaluation / Conclusion Section
+            conclusion = evaluation_results.get("conclusion", "Analysis Complete")
+            if isinstance(conclusion, dict): 
+                conclusion = str(conclusion)
+                
+            eval_md = f"""## Evaluation and Conclusion
+            
+    ### Final Conclusion
+    **{conclusion.upper()}**
+
+    ### Reasoning
+    {evaluation_results.get('reasoning', 'See full report for detailed reasoning.')}
+    """
+            nb.cells.append(new_markdown_cell(eval_md))
+            
+            # 5. Visualizations
+            if visualizations:
+                viz_md = "## Generated Visualizations\n\nThe following visualizations were generated during the analysis:"
+                nb.cells.append(new_markdown_cell(viz_md))
+                
+                for viz_name, viz_path in visualizations.items():
+                    try:
+                        # Attempt to make path relative to the notebook location
+                        viz_abs_path = Path(viz_path).resolve()
+                        notebook_dir = output_path.parent.resolve()
+                        rel_path = os.path.relpath(viz_abs_path, notebook_dir)
+                        nb.cells.append(new_markdown_cell(f"### {viz_name}\n![{viz_name}]({rel_path})"))
+                    except Exception:
+                        nb.cells.append(new_markdown_cell(f"**{viz_name}**: Saved at `{viz_path}`"))
+
+            # Write file
+            with open(output_path, 'w', encoding='utf-8') as f:
+                nbformat.write(nb, f)
+                
+            return output_path
+
+    async def _generate_step_explanation(self, index: int, code: str, result: str) -> str:
+        """
+        Helper to generate an explanation for a specific notebook step using LLM.
+        """
+        header = f"### Step {index}: Analysis Execution"
+        section_name = "notebook_step_explainer"
+        
+        # 1. Check if LLM and Prompts are available
+        if not self.llm_interface or section_name not in self.reporter_prompts:
+            return f"{header}\nRun the code below to execute this step."
+            
+        try:
+            # 2. Extract prompt configuration
+            prompt_config = self.reporter_prompts[section_name]
+            system_prompt = prompt_config.get("system_prompt", "")
+            user_prompt_template = prompt_config.get("user_prompt", "")
+            
+            # 3. Format arguments (Truncating to avoid token limits)
+            user_prompt = user_prompt_template.format(
+                step_index=index,
+                code_content=code[:2500],
+                execution_result=result[:1000]
+            )
+            
+            # 4. Call LLM
+            response = await self.llm_interface.generate(
+                prompt=user_prompt,
+                system_message=system_prompt,
+                agent_name="reporter"
+            )
+            
+            return f"{header}\n\n{response.strip()}"
+            
+        except Exception as e:
+            # Log error but return basic header so notebook generation doesn't fail
+            if hasattr(self, 'logger'):
+                self.logger.error(f"Error generating explanation for step {index}: {e}")
+            return f"{header}\nRun the code below to execute this step."
+        
     def _get_filename_from_title(self, title: str) -> str:
         """
         Generate a clean, informative filename based on the report title.

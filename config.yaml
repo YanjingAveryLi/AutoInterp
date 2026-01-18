@@ -40,7 +40,7 @@ analysis:
   output_format: "json"
   timeout_per_analysis: 300
   max_iterations: 3      # Maximum number of analysis cycles per question
-  confidence_threshold: 0.85  # Continue analysis if confidence_threshold > confidence
+  confidence_threshold: 0.55  # Continue analysis if confidence_threshold > confidence
 
 # Execution settings
 execution:

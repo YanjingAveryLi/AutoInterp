@@ -1953,23 +1953,44 @@ async def generate_report(
     
     # Generate report (let the report generator handle title generation)
     try:
-        # Pass the active_question as plain text directly
         report_path = await report_generator.generate_report(
-            question=active_question,  # Plain text, not a dictionary
+            question=active_question, 
             analysis_results=combined_analysis_result,
             evaluation_results=combined_evaluation_result,
             visualizations=visualizations,
-            title=None  # Let report generator generate the title
+            title=None
         )
         
         logger.info(f"Generated report at {report_path}")
         print(f"[AUTOINTERP] Generated comprehensive report at {report_path}")
         
+        try:
+            report_path_obj = Path(report_path)
+            notebook_filename = report_path_obj.stem + "_transparent.ipynb"
+            notebook_path = report_path_obj.parent / notebook_filename
+            
+            print(f"[AUTOINTERP] Generating transparent Jupyter Notebook at {notebook_path}...")
+            
+            await report_generator.generate_jupyter_notebook(
+                question=active_question,
+                analysis_results=combined_analysis_result,
+                evaluation_results=combined_evaluation_result,
+                visualizations=visualizations,
+                output_path=notebook_path
+            )
+            print("[AUTOINTERP] Notebook generation complete.")
+            
+        except Exception as nb_e:
+            logger.error(f"Failed to generate Jupyter notebook: {nb_e}")
+            print(f"[AUTOINTERP] Warning: Failed to generate Jupyter notebook: {nb_e}")
+
         return {
             "report_path": report_path,
+            "notebook_path": notebook_path,
             "conclusion": conclusion_type,
             "final_confidence": final_confidence
         }
+    
     except Exception as e:
         logger.error(f"Error generating report: {str(e)}")
         print(f"[AUTOINTERP] Error generating report: {str(e)}")
