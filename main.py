@@ -1872,9 +1872,8 @@ async def generate_visualizations(
     
     return visualization_files
 
-
 async def generate_report(
-    active_question: Union[str, Dict[str, Any]],  # Can be raw text or dict
+    active_question: Union[str, Dict[str, Any]],
     all_analyses: List[Dict[str, Any]],
     all_evaluations: List[Dict[str, Any]],
     report_generator: ReportGenerator,
@@ -1896,7 +1895,12 @@ async def generate_report(
         
     Returns:
         Report generation results
+        Jupyter Notebook
     """
+    # [FIX 1] Extract task_name here so it is available for logging and the fallback report
+    task_desc = config.get("task", {}).get("description", "Unnamed Task")
+    task_name = task_desc[:50] + "..." if len(task_desc) > 50 else task_desc
+
     logger.info("Starting report generation...")
     print(f"[AUTOINTERP] PHASE 4/4: Report Generation")
     
@@ -1917,7 +1921,6 @@ async def generate_report(
         conclusion_type = "concluded"
         conclusion_text = "CONCLUDED"
 
-    
     print(f"[AUTOINTERP] Final conclusion: Investigation is {conclusion_text}")
     print(f"[AUTOINTERP] Final confidence: {final_confidence:.2f}")
     
@@ -1946,6 +1949,7 @@ async def generate_report(
     
     # Find successful analyses and extract their files
     path_resolver = framework["path_resolver"]
+    # Ensure find_successful_analyses is imported or available in scope
     successful_analyses = find_successful_analyses(path_resolver)
     
     # Generate visualizations using the full pipeline
@@ -1966,16 +1970,18 @@ async def generate_report(
         
         try:
             report_path_obj = Path(report_path)
-            notebook_filename = report_path_obj.stem + "_transparent.ipynb"
+            notebook_filename = report_path_obj.stem + "_notebook.ipynb"
             notebook_path = report_path_obj.parent / notebook_filename
             
             print(f"[AUTOINTERP] Generating transparent Jupyter Notebook at {notebook_path}...")
             
+            # [FIX 2] Added task_config=config to pass the experiment context
             await report_generator.generate_jupyter_notebook(
                 question=active_question,
                 analysis_results=combined_analysis_result,
                 evaluation_results=combined_evaluation_result,
                 visualizations=visualizations,
+                task_config=config, 
                 output_path=notebook_path
             )
             print("[AUTOINTERP] Notebook generation complete.")
@@ -1996,6 +2002,7 @@ async def generate_report(
         print(f"[AUTOINTERP] Error generating report: {str(e)}")
         
         # Create a simple markdown report as fallback
+        # task_name is now safely defined at the top of the function
         simple_report = f"# Interpretability Report: {task_name}\n\n"
         simple_report += f"## Question\n"
         

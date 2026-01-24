@@ -1727,31 +1727,80 @@ plt.show()
                 raise Exception(f"PDF summary generation failed and no fallback available: {e}")
         
     async def generate_jupyter_notebook(self, 
-                                        question: Union[str, Dict[str, Any]],
-                                        analysis_results: Dict[str, Any],
-                                        evaluation_results: Dict[str, Any],
-                                        visualizations: Dict[str, str],
-                                        title: Optional[str] = None,
-                                        output_path: Optional[Path] = None) -> Path:
-            """
-            Generates a reproducible Jupyter notebook (.ipynb) with transparent step-by-step explanations.
-            """
-            if output_path is None:
-                raise ValueError("output_path must be provided")
+                                      question: Union[str, Dict[str, Any]],
+                                      analysis_results: Dict[str, Any],
+                                      evaluation_results: Dict[str, Any],
+                                      visualizations: Dict[str, str],
+                                      task_config: Optional[Dict[str, Any]] = None,
+                                      title: Optional[str] = None,
+                                      output_path: Optional[Path] = None) -> Path:
+        """
+        Generates a reproducible Jupyter notebook (.ipynb) with transparent step-by-step explanations.
+        """
+        if output_path is None:
+            raise ValueError("output_path must be provided")
 
-            # Initialize notebook
-            nb = new_notebook()
+        # Initialize notebook
+        nb = new_notebook()
+        
+        # --- 1. Parse and Format Markdown Sections ---
+        display_title = title or "AutoInterp Analysis Report"
+        
+        # Extract the raw text
+        raw_text = question.get("text", str(question)) if isinstance(question, dict) else str(question)
+        
+        # Parse the specific sections (Question, Rationale, Procedure)
+        # This handles the specific format output by your Prioritizer agent
+        q_content = raw_text
+        rationale_content = ""
+        procedure_content = ""
+        
+        if "RATIONALE:" in raw_text:
+            parts = raw_text.split("RATIONALE:")
+            q_content = parts[0].replace("Question:", "").strip()
             
-            # 1. Title and Introduction
-            display_title = title or "AutoInterp Analysis Report"
-            # Handle question if it's a dict
-            question_text = question.get("text", str(question)) if isinstance(question, dict) else str(question)
+            remaining = parts[1]
+            if "PROCEDURE:" in remaining:
+                subparts = remaining.split("PROCEDURE:")
+                rationale_content = subparts[0].strip()
+                # Remove 'TITLE:' if it exists at the very end
+                procedure_content = subparts[1].split("TITLE:")[0].strip()
+            else:
+                rationale_content = remaining.strip()
+
+        # Add Title Cell
+        nb.cells.append(new_markdown_cell(f"# {display_title}"))
+        
+        # Add Question Cell
+        nb.cells.append(new_markdown_cell(f"## Research Question\n{q_content}"))
+        
+        # Add Rationale Cell (if present)
+        if rationale_content:
+            nb.cells.append(new_markdown_cell(f"### Rationale\n{rationale_content}"))
             
-            nb.cells.append(new_markdown_cell(f"# {display_title}\n\n**Research Question:** {question_text}"))
-            nb.cells.append(new_markdown_cell("## Introduction\nThis notebook documents the step-by-step analysis performed. It is generated automatically to ensure transparency and reproducibility."))
-            
-            # 2. Setup/Imports Cell
-            setup_code = """import os
+        # Add Procedure Cell (if present)
+        if procedure_content:
+            nb.cells.append(new_markdown_cell(f"### Proposed Procedure\n{procedure_content}"))
+        
+        # Add Experiment Config Cell
+        intro_md = "## Experiment Setup\nThis notebook documents the step-by-step analysis performed by the AutoInterp agent."
+        if task_config:
+            intro_md += "\n\n**Configuration:**\n"
+            if "model" in task_config:
+                 intro_md += f"- **Model:** `{task_config['model'].get('name', 'Unknown')}`\n"
+            if "dataset" in task_config:
+                 intro_md += f"- **Dataset:** `{task_config.get('dataset', 'Unknown')}`\n"
+        nb.cells.append(new_markdown_cell(intro_md))
+        
+        # --- 2. Setup Code Cell ---
+        import json
+        
+        # Serialize variables safely to avoid syntax errors in the generated python code
+        # json.dumps ensures strings are properly escaped (e.g., newlines become \n)
+        config_json = json.dumps(task_config) if task_config else "{}"
+        question_json = json.dumps(raw_text) 
+        
+        setup_code = f"""import os
 import sys
 import json
 import torch
@@ -1759,84 +1808,95 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from pathlib import Path
+
+# --- Experiment Context ---
+# RAW_QUESTION contains the full text passed to the agent
+RAW_QUESTION = {question_json}
+TASK_CONFIG = {config_json}
+
+# Ensure output directories exist
+os.makedirs("outputs", exist_ok=True)
+
 # Setup basic configuration
 %matplotlib inline
-print("Environment setup complete.")
+print(f"Environment setup complete.")
+print(f"Loaded configuration for task: {{TASK_CONFIG.get('description', 'N/A')}}")
 """
-            nb.cells.append(new_code_cell(setup_code))
+        nb.cells.append(new_code_cell(setup_code))
+        
+        # --- 3. Process Analysis Steps Chronologically ---
+        analyses = analysis_results.get("analyses", [])
+        successful_steps = [a for a in analyses if a.get("status") == "success"]
+        
+        if len(successful_steps) == 0 and len(analyses) > 0:
+            successful_steps = analyses
+        
+        for i, step in enumerate(successful_steps, 1):
+            code_content = step.get("code", "")
             
-            # 3. Process Analysis Steps Chronologically
-            analyses = analysis_results.get("analyses", [])
-            print(f"analyses length: {len(analyses)}")
-            successful_steps = [a for a in analyses if a.get("status") == "success"]
-            print(f"num successful steps: {len(successful_steps)}")
-            if len(successful_steps) == 0:
-                successful_steps = analyses
+            if not code_content.strip():
+                continue
+
+            # Handle results
+            raw_result = step.get("results", "")
+            if isinstance(raw_result, dict):
+                result_output = raw_result.get("stdout", "") or str(raw_result)
+            else:
+                result_output = str(raw_result)
             
-            for i, step in enumerate(successful_steps, 1):
-                code_content = step.get("code", "")
-                
-                # Handle results (could be dict or str depending on executor)
-                raw_result = step.get("results", "")
-                if isinstance(raw_result, dict):
-                    result_output = raw_result.get("stdout", "") or str(raw_result)
-                else:
-                    result_output = str(raw_result)
-                
-                # Skip empty steps
-                if not code_content.strip():
-                    continue
+            # Generate Explanation via LLM
+            explanation = await self._generate_step_explanation(i, code_content, result_output)
+            
+            # Append separate cells for explanation and code
+            nb.cells.append(new_markdown_cell(f"### Step {i}\n{explanation}"))
+            nb.cells.append(new_code_cell(code_content))
+            
+            # Add Output Summary
+            if result_output:
+                trunc_len = 1000
+                trunc_out = result_output[:trunc_len] + f"\n... [Output Truncated]" if len(result_output) > trunc_len else result_output
+                nb.cells.append(new_markdown_cell(f"**Execution Output:**\n```text\n{trunc_out}\n```"))
+
+        # --- 4. Evaluation / Conclusion Section ---
+        conclusion = evaluation_results.get("conclusion", "Analysis Complete")
+        if isinstance(conclusion, dict): 
+            conclusion = str(conclusion)
+            
+        eval_md = f"""## Evaluation and Conclusion
+        
+### Final Conclusion
+**{conclusion.upper()}**
+
+### Reasoning
+{evaluation_results.get('reasoning', 'See full report for detailed reasoning.')}
+"""
+        nb.cells.append(new_markdown_cell(eval_md))
+        
+        # --- 5. Visualizations ---
+        if visualizations:
+            viz_md = "## Generated Visualizations"
+            nb.cells.append(new_markdown_cell(viz_md))
+            
+            for viz_name, viz_path in visualizations.items():
+                try:
+                    viz_abs_path = Path(viz_path).resolve()
+                    notebook_dir = output_path.parent.resolve()
                     
-                # Generate Explanation via LLM
-                explanation = await self._generate_step_explanation(i, code_content, result_output)
-                
-                # Add Explanation Markdown
-                nb.cells.append(new_markdown_cell(explanation))
-                
-                # Add Code Cell
-                nb.cells.append(new_code_cell(code_content))
-                
-                # Add Output Summary (Truncated)
-                if result_output:
-                    trunc_out = result_output[:1000] + "\n... [Output Truncated]" if len(result_output) > 1000 else result_output
-                    nb.cells.append(new_markdown_cell(f"**Output from execution:**\n```text\n{trunc_out}\n```"))
-
-            # 4. Evaluation / Conclusion Section
-            conclusion = evaluation_results.get("conclusion", "Analysis Complete")
-            if isinstance(conclusion, dict): 
-                conclusion = str(conclusion)
-                
-            eval_md = f"""## Evaluation and Conclusion
-            
-    ### Final Conclusion
-    **{conclusion.upper()}**
-
-    ### Reasoning
-    {evaluation_results.get('reasoning', 'See full report for detailed reasoning.')}
-    """
-            nb.cells.append(new_markdown_cell(eval_md))
-            
-            # 5. Visualizations
-            if visualizations:
-                viz_md = "## Generated Visualizations\n\nThe following visualizations were generated during the analysis:"
-                nb.cells.append(new_markdown_cell(viz_md))
-                
-                for viz_name, viz_path in visualizations.items():
                     try:
-                        # Attempt to make path relative to the notebook location
-                        viz_abs_path = Path(viz_path).resolve()
-                        notebook_dir = output_path.parent.resolve()
                         rel_path = os.path.relpath(viz_abs_path, notebook_dir)
-                        nb.cells.append(new_markdown_cell(f"### {viz_name}\n![{viz_name}]({rel_path})"))
-                    except Exception:
-                        nb.cells.append(new_markdown_cell(f"**{viz_name}**: Saved at `{viz_path}`"))
+                    except ValueError:
+                        rel_path = str(viz_abs_path)
+                        
+                    nb.cells.append(new_markdown_cell(f"### {viz_name}\n![{viz_name}]({rel_path})"))
+                except Exception:
+                    nb.cells.append(new_markdown_cell(f"**{viz_name}**: Saved at `{viz_path}`"))
 
-            # Write file
-            with open(output_path, 'w', encoding='utf-8') as f:
-                nbformat.write(nb, f)
-                
-            return output_path
-
+        # Write file
+        with open(output_path, 'w', encoding='utf-8') as f:
+            nbformat.write(nb, f)
+            
+        return output_path
+        
     async def _generate_step_explanation(self, index: int, code: str, result: str) -> str:
         """
         Helper to generate an explanation for a specific notebook step using LLM.
