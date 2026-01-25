@@ -1727,30 +1727,42 @@ plt.show()
                 raise Exception(f"PDF summary generation failed and no fallback available: {e}")
         
     async def generate_jupyter_notebook(self, 
-                                      question: Union[str, Dict[str, Any]],
-                                      analysis_results: Dict[str, Any],
-                                      evaluation_results: Dict[str, Any],
-                                      visualizations: Dict[str, str],
-                                      task_config: Optional[Dict[str, Any]] = None,
-                                      title: Optional[str] = None,
-                                      output_path: Optional[Path] = None) -> Path:
+                                        question: Union[str, Dict[str, Any]],
+                                        analysis_results: Dict[str, Any],
+                                        evaluation_results: Dict[str, Any],
+                                        visualizations: Dict[str, str],
+                                        task_config: Optional[Dict[str, Any]] = None,
+                                        title: Optional[str] = None,
+                                        output_path: Optional[Path] = None) -> Path:
         """
-        Generates a reproducible Jupyter notebook (.ipynb) with transparent step-by-step explanations.
+        Generates a reproducible Jupyter notebook (.ipynb) using nbformat.
         """
         if output_path is None:
             raise ValueError("output_path must be provided")
 
-        # Initialize notebook
-        nb = new_notebook()
+        print(f"Generating Modular Jupyter Notebook at {output_path}...")
         
-        # --- 1. Parse and Format Markdown Sections ---
+        # --- 1. Initialize Notebook & Metadata ---
+        nb = nbformat.v4.new_notebook()
+        nb.metadata = {
+            "kernelspec": {
+                "display_name": "Python 3 (Data Science)",
+                "language": "python",
+                "name": "python3"
+            },
+            "language_info": {
+                "file_extension": ".py",
+                "mimetype": "text/x-python",
+                "name": "python",
+                "version": "3.10"
+            }
+        }
+
+        # --- 2. Markdown Header & Intro ---
         display_title = title or "AutoInterp Analysis Report"
-        
-        # Extract the raw text
         raw_text = question.get("text", str(question)) if isinstance(question, dict) else str(question)
         
-        # Parse the specific sections (Question, Rationale, Procedure)
-        # This handles the specific format output by your Prioritizer agent
+        # Parse text (Question/Rationale/Procedure extraction logic)
         q_content = raw_text
         rationale_content = ""
         procedure_content = ""
@@ -1758,31 +1770,24 @@ plt.show()
         if "RATIONALE:" in raw_text:
             parts = raw_text.split("RATIONALE:")
             q_content = parts[0].replace("Question:", "").strip()
-            
             remaining = parts[1]
             if "PROCEDURE:" in remaining:
                 subparts = remaining.split("PROCEDURE:")
                 rationale_content = subparts[0].strip()
-                # Remove 'TITLE:' if it exists at the very end
                 procedure_content = subparts[1].split("TITLE:")[0].strip()
             else:
                 rationale_content = remaining.strip()
 
-        # Add Title Cell
-        nb.cells.append(new_markdown_cell(f"# {display_title}"))
+        # Add Header Cells
+        nb.cells.append(nbformat.v4.new_markdown_cell(f"# {display_title}"))
+        nb.cells.append(nbformat.v4.new_markdown_cell(f"## Research Question\n{q_content}"))
         
-        # Add Question Cell
-        nb.cells.append(new_markdown_cell(f"## Research Question\n{q_content}"))
-        
-        # Add Rationale Cell (if present)
         if rationale_content:
-            nb.cells.append(new_markdown_cell(f"### Rationale\n{rationale_content}"))
-            
-        # Add Procedure Cell (if present)
+            nb.cells.append(nbformat.v4.new_markdown_cell(f"### Rationale\n{rationale_content}"))
         if procedure_content:
-            nb.cells.append(new_markdown_cell(f"### Proposed Procedure\n{procedure_content}"))
+            nb.cells.append(nbformat.v4.new_markdown_cell(f"### Proposed Procedure\n{procedure_content}"))
         
-        # Add Experiment Config Cell
+        # Experiment Setup Context
         intro_md = "## Experiment Setup\nThis notebook documents the step-by-step analysis performed by the AutoInterp agent."
         if task_config:
             intro_md += "\n\n**Configuration:**\n"
@@ -1790,77 +1795,52 @@ plt.show()
                  intro_md += f"- **Model:** `{task_config['model'].get('name', 'Unknown')}`\n"
             if "dataset" in task_config:
                  intro_md += f"- **Dataset:** `{task_config.get('dataset', 'Unknown')}`\n"
-        nb.cells.append(new_markdown_cell(intro_md))
+        nb.cells.append(nbformat.v4.new_markdown_cell(intro_md))
         
-        # --- 2. Setup Code Cell ---
-        import json
+        # --- 3. Dynamic Environment Setup ---
+        # (Passes analysis results to scan for imports like sklearn/cv2/wandb)
+        nb.cells.append(self._create_setup_cell(analysis_results))
         
-        # Serialize variables safely to avoid syntax errors in the generated python code
-        # json.dumps ensures strings are properly escaped (e.g., newlines become \n)
-        config_json = json.dumps(task_config) if task_config else "{}"
-        question_json = json.dumps(raw_text) 
-        
-        setup_code = f"""import os
-import sys
-import json
-import torch
-import numpy as np
-import pandas as pd
-import matplotlib.pyplot as plt
-from pathlib import Path
-
-# --- Experiment Context ---
-# RAW_QUESTION contains the full text passed to the agent
-RAW_QUESTION = {question_json}
-TASK_CONFIG = {config_json}
-
-# Ensure output directories exist
-os.makedirs("outputs", exist_ok=True)
-
-# Setup basic configuration
-%matplotlib inline
-print(f"Environment setup complete.")
-print(f"Loaded configuration for task: {{TASK_CONFIG.get('description', 'N/A')}}")
-"""
-        nb.cells.append(new_code_cell(setup_code))
-        
-        # --- 3. Process Analysis Steps Chronologically ---
+        # --- 4. Process Analysis Steps ---
         analyses = analysis_results.get("analyses", [])
         successful_steps = [a for a in analyses if a.get("status") == "success"]
-        
-        if len(successful_steps) == 0 and len(analyses) > 0:
-            successful_steps = analyses
+        if not successful_steps and analyses:
+            successful_steps = analyses  # Fallback to showing everything if no explicit success
         
         for i, step in enumerate(successful_steps, 1):
-            code_content = step.get("code", "")
-            
-            if not code_content.strip():
-                continue
+            raw_code = step.get("code", "")
+            if not raw_code.strip(): continue
 
-            # Handle results
+            # A. Sanitize (Fix null/true/false artifacts)
+            clean_code = self._sanitize_code(raw_code)
+
+            # B. Generate Explanation (Context + Alternatives)
             raw_result = step.get("results", "")
-            if isinstance(raw_result, dict):
-                result_output = raw_result.get("stdout", "") or str(raw_result)
-            else:
-                result_output = str(raw_result)
+            result_output = raw_result.get("stdout", "") if isinstance(raw_result, dict) else str(raw_result)
             
-            # Generate Explanation via LLM
-            explanation = await self._generate_step_explanation(i, code_content, result_output)
+            explanation_md = await self._generate_step_explanation(i, clean_code, result_output)
+            nb.cells.append(nbformat.v4.new_markdown_cell(explanation_md))
+
+            # C. Modularize (Split code into Imports -> Helpers -> Logic)
+            code_chunks = self._split_code_into_logical_chunks(clean_code)
             
-            # Append separate cells for explanation and code
-            nb.cells.append(new_markdown_cell(f"### Step {i}\n{explanation}"))
-            nb.cells.append(new_code_cell(code_content))
+            for chunk in code_chunks:
+                # Add mini-headers for clarity
+                if chunk['title'] and chunk['title'] != "Analysis Logic":
+                     nb.cells.append(nbformat.v4.new_markdown_cell(f"**{chunk['title']}**"))
+                
+                # Add the runnable code
+                nb.cells.append(nbformat.v4.new_code_cell(chunk['content']))
             
-            # Add Output Summary
+            # D. Output Summary
             if result_output:
                 trunc_len = 1000
                 trunc_out = result_output[:trunc_len] + f"\n... [Output Truncated]" if len(result_output) > trunc_len else result_output
-                nb.cells.append(new_markdown_cell(f"**Execution Output:**\n```text\n{trunc_out}\n```"))
+                nb.cells.append(nbformat.v4.new_markdown_cell(f"**Verifiable Output:**\n```text\n{trunc_out}\n```"))
 
-        # --- 4. Evaluation / Conclusion Section ---
+        # --- 5. Evaluation & Conclusion ---
         conclusion = evaluation_results.get("conclusion", "Analysis Complete")
-        if isinstance(conclusion, dict): 
-            conclusion = str(conclusion)
+        if isinstance(conclusion, dict): conclusion = str(conclusion)
             
         eval_md = f"""## Evaluation and Conclusion
         
@@ -1870,58 +1850,60 @@ print(f"Loaded configuration for task: {{TASK_CONFIG.get('description', 'N/A')}}
 ### Reasoning
 {evaluation_results.get('reasoning', 'See full report for detailed reasoning.')}
 """
-        nb.cells.append(new_markdown_cell(eval_md))
+        nb.cells.append(nbformat.v4.new_markdown_cell(eval_md))
         
-        # --- 5. Visualizations ---
+        # --- 6. Visualizations ---
         if visualizations:
-            viz_md = "## Generated Visualizations"
-            nb.cells.append(new_markdown_cell(viz_md))
-            
+            nb.cells.append(nbformat.v4.new_markdown_cell("## Generated Visualizations"))
+            notebook_dir = output_path.parent.resolve()
+
             for viz_name, viz_path in visualizations.items():
                 try:
+                    # Attempt relative path for portability
                     viz_abs_path = Path(viz_path).resolve()
-                    notebook_dir = output_path.parent.resolve()
-                    
                     try:
                         rel_path = os.path.relpath(viz_abs_path, notebook_dir)
                     except ValueError:
                         rel_path = str(viz_abs_path)
                         
-                    nb.cells.append(new_markdown_cell(f"### {viz_name}\n![{viz_name}]({rel_path})"))
+                    nb.cells.append(nbformat.v4.new_markdown_cell(f"### {viz_name}\n![{viz_name}]({rel_path})"))
                 except Exception:
-                    nb.cells.append(new_markdown_cell(f"**{viz_name}**: Saved at `{viz_path}`"))
+                    nb.cells.append(nbformat.v4.new_markdown_cell(f"**{viz_name}**: Saved at `{viz_path}`"))
 
-        # Write file
+        # --- 7. Save File ---
         with open(output_path, 'w', encoding='utf-8') as f:
             nbformat.write(nb, f)
             
+        print(f"[AUTOINTERP] Notebook generation complete at {output_path}")
         return output_path
-        
+
+    # --- HELPER METHODS (Ensure these are in the class) ---
+
     async def _generate_step_explanation(self, index: int, code: str, result: str) -> str:
         """
-        Helper to generate an explanation for a specific notebook step using LLM.
+        Generates commentary using the prompt defined in prompts/reporter.yaml.
         """
-        header = f"### Step {index}: Analysis Execution"
-        section_name = "notebook_step_explainer"
+        header = f"## Step {index}: Analysis Execution"
+        section_key = "notebook_step_explainer"
         
-        # 1. Check if LLM and Prompts are available
-        if not self.llm_interface or section_name not in self.reporter_prompts:
-            return f"{header}\nRun the code below to execute this step."
-            
+        # 1. Safety Check: Ensure prompts are loaded
+        if not self.llm_interface or not hasattr(self, 'reporter_prompts') or section_key not in self.reporter_prompts:
+            return f"{header}\n*Automated explanation unavailable (Prompt '{section_key}' not found).*"
+
         try:
-            # 2. Extract prompt configuration
-            prompt_config = self.reporter_prompts[section_name]
-            system_prompt = prompt_config.get("system_prompt", "")
-            user_prompt_template = prompt_config.get("user_prompt", "")
+            # 2. Extract configuration from YAML dict
+            prompt_config = self.reporter_prompts[section_key]
+            system_prompt = prompt_config.get("system_prompt", "You are a helpful assistant.")
+            user_prompt_template = prompt_config.get("user_prompt", "{code_content}")
             
-            # 3. Format arguments (Truncating to avoid token limits)
+            # 3. Format the prompt (Truncate large outputs to save tokens)
             user_prompt = user_prompt_template.format(
                 step_index=index,
-                code_content=code[:2500],
+                code_content=code[:2500], 
                 execution_result=result[:1000]
             )
             
-            # 4. Call LLM
+            # 4. Generate Response
             response = await self.llm_interface.generate(
                 prompt=user_prompt,
                 system_message=system_prompt,
@@ -1931,11 +1913,91 @@ print(f"Loaded configuration for task: {{TASK_CONFIG.get('description', 'N/A')}}
             return f"{header}\n\n{response.strip()}"
             
         except Exception as e:
-            # Log error but return basic header so notebook generation doesn't fail
             if hasattr(self, 'logger'):
                 self.logger.error(f"Error generating explanation for step {index}: {e}")
-            return f"{header}\nRun the code below to execute this step."
+            return f"{header}\n*Error generating explanation: {str(e)}*"
+
+    def _sanitize_code(self, code: str) -> str:
+        """Cleans up common JSON-to-Python artifacts and format issues."""
+        import re
+        # Fix JSON booleans/nulls
+        replacements = {r'\bnull\b': 'None', r'\btrue\b': 'True', r'\bfalse\b': 'False'}
+        for pattern, replacement in replacements.items():
+            code = re.sub(pattern, replacement, code, flags=re.IGNORECASE)
+        # Fix markdown artifacts
+        code = code.replace("```python", "").replace("```", "")
+        # Ensure consistent spacing
+        code = re.sub(r'\n+(def|class) ', r'\n\n\n\1 ', code)
+        return code.strip()
+
+    def _split_code_into_logical_chunks(self, code: str) -> List[Dict[str, str]]:
+        """Splits script into imports, definitions, and execution chunks."""
+        import re
+        chunks = []
+        lines = code.split('\n')
         
+        # Extract Imports
+        import_lines = [l for l in lines if l.strip().startswith(('import ', 'from '))]
+        other_lines = [l for l in lines if not l.strip().startswith(('import ', 'from '))]
+        
+        if import_lines:
+            chunks.append({"type": "code", "title": "Imports & Dependencies", "content": "\n".join(import_lines)})
+            
+        remaining_code = "\n".join(other_lines).strip()
+        
+        # Split by logical blocks
+        raw_sections = re.split(r'\n{2,}(?=# |def |class |if __name__)', remaining_code)
+        
+        for section in raw_sections:
+            section = section.strip()
+            if not section: continue
+            
+            title = "Analysis Logic"
+            if section.startswith("def "):
+                title = f"Define Helper: `{section.split('(')[0].replace('def ', '')}`"
+            elif section.startswith("class "):
+                title = f"Define Class: `{section.split(':')[0].replace('class ', '')}`"
+            elif section.startswith("#"):
+                title = section.split('\n')[0].replace("#", "").strip()
+            elif "plt." in section or "fig." in section:
+                title = "Visualization"
+            
+            chunks.append({"type": "code", "title": title, "content": section})
+            
+        return chunks
+
+    def _get_dynamic_requirements(self, analysis_results: Dict[str, Any]) -> List[str]:
+        """Scans code to find necessary pip packages."""
+        import re
+        IMPORT_TO_PIP = {
+            "sklearn": "scikit-learn", "cv2": "opencv-python", "PIL": "Pillow",
+            "yaml": "PyYAML", "transformer_lens": "transformer_lens", 
+            "plotly": "plotly", "wandb": "wandb", "jaxtyping": "jaxtyping"
+        }
+        STDLIB = {"os", "sys", "json", "math", "re", "time", "typing", "pathlib", "numpy", "pandas", "torch"}
+        
+        analyses = analysis_results.get("analyses", [])
+        all_code = "\n".join([a.get("code", "") for a in analyses])
+        matches = re.findall(r'^\s*(?:from|import)\s+(\w+)', all_code, re.MULTILINE)
+        
+        found = {"transformer_lens", "torch", "einops", "jaxtyping"} # Core defaults
+        for module in matches:
+            if module not in STDLIB:
+                found.add(IMPORT_TO_PIP.get(module, module))
+        return sorted(list(found))
+
+    def _create_setup_cell(self, analysis_results: Dict[str, Any]) -> nbformat.NotebookNode:
+        """Creates the installation cell."""
+        requirements = self._get_dynamic_requirements(analysis_results)
+        content = (
+            "# --- Environment Setup ---\n"
+            f"!pip install {' '.join(requirements)}\n\n"
+            "import torch\nimport numpy as np\nimport pandas as pd\n"
+            "device = 'cuda' if torch.cuda.is_available() else 'cpu'\n"
+            "print(f'Running on {device}')"
+        )
+        return new_code_cell(content)
+    
     def _get_filename_from_title(self, title: str) -> str:
         """
         Generate a clean, informative filename based on the report title.

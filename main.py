@@ -1975,7 +1975,6 @@ async def generate_report(
             
             print(f"[AUTOINTERP] Generating transparent Jupyter Notebook at {notebook_path}...")
             
-            # [FIX 2] Added task_config=config to pass the experiment context
             await report_generator.generate_jupyter_notebook(
                 question=active_question,
                 analysis_results=combined_analysis_result,
