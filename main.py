@@ -508,7 +508,7 @@ async def prioritize_questions(
             import shutil
             shutil.copy(raw_questions_path, prioritized_path)
             print(f"[AUTOINTERP] Copied raw questions to {prioritized_path}")
-    
+    new_project_id = None
     # Read and print prioritized question
     if prioritized_path.exists():
         try:
@@ -541,10 +541,6 @@ async def prioritize_questions(
                     config["title"] = extracted_title
                     
                     print(f"[AUTOINTERP] Setting new project ID: {new_project_id}")
-                    
-                    # Immediately rename the project (we'll do it properly later)
-                    old_project_id = config.get("project_id", "working_project")
-                    config["project_id"] = new_project_id
             
         except Exception as e:
             print(f"[AUTOINTERP] Error reading prioritized question: {e}")
@@ -563,8 +559,6 @@ async def prioritize_questions(
     # If we already have a title from the prioritized question, use that
     # Otherwise, fall back to the task name
     if "title" in config:
-        # We already set new_project_id in config when we extracted the title
-        new_project_id = config["project_id"]
         print(f"[AUTOINTERP] Using extracted title for project ID: {new_project_id}")
     else:
         # Fall back to using the task name with timestamp
@@ -646,6 +640,8 @@ async def prioritize_questions(
     
     # Return our simple dict with raw_text instead of structured question
     return selected_hyp
+
+
 
 async def analyze_question(
     active_question: Union[str, Dict[str, Any]],  # Can be raw text or dict
@@ -1876,9 +1872,8 @@ async def generate_visualizations(
     
     return visualization_files
 
-
 async def generate_report(
-    active_question: Union[str, Dict[str, Any]],  # Can be raw text or dict
+    active_question: Union[str, Dict[str, Any]],
     all_analyses: List[Dict[str, Any]],
     all_evaluations: List[Dict[str, Any]],
     report_generator: ReportGenerator,
@@ -1900,7 +1895,12 @@ async def generate_report(
         
     Returns:
         Report generation results
+        Jupyter Notebook
     """
+    # [FIX 1] Extract task_name here so it is available for logging and the fallback report
+    task_desc = config.get("task", {}).get("description", "Unnamed Task")
+    task_name = task_desc[:50] + "..." if len(task_desc) > 50 else task_desc
+
     logger.info("Starting report generation...")
     print(f"[AUTOINTERP] PHASE 4/4: Report Generation")
     
@@ -1921,7 +1921,6 @@ async def generate_report(
         conclusion_type = "concluded"
         conclusion_text = "CONCLUDED"
 
-    
     print(f"[AUTOINTERP] Final conclusion: Investigation is {conclusion_text}")
     print(f"[AUTOINTERP] Final confidence: {final_confidence:.2f}")
     
@@ -1950,6 +1949,7 @@ async def generate_report(
     
     # Find successful analyses and extract their files
     path_resolver = framework["path_resolver"]
+    # Ensure find_successful_analyses is imported or available in scope
     successful_analyses = find_successful_analyses(path_resolver)
     
     # Generate visualizations using the full pipeline
@@ -1957,28 +1957,51 @@ async def generate_report(
     
     # Generate report (let the report generator handle title generation)
     try:
-        # Pass the active_question as plain text directly
         report_path = await report_generator.generate_report(
-            question=active_question,  # Plain text, not a dictionary
+            question=active_question, 
             analysis_results=combined_analysis_result,
             evaluation_results=combined_evaluation_result,
             visualizations=visualizations,
-            title=None  # Let report generator generate the title
+            title=None
         )
         
         logger.info(f"Generated report at {report_path}")
         print(f"[AUTOINTERP] Generated comprehensive report at {report_path}")
         
+        try:
+            report_path_obj = Path(report_path)
+            notebook_filename = report_path_obj.stem + "_notebook.ipynb"
+            notebook_path = report_path_obj.parent / notebook_filename
+            
+            print(f"[AUTOINTERP] Generating transparent Jupyter Notebook at {notebook_path}...")
+            
+            await report_generator.generate_jupyter_notebook(
+                question=active_question,
+                analysis_results=combined_analysis_result,
+                evaluation_results=combined_evaluation_result,
+                visualizations=visualizations,
+                task_config=config, 
+                output_path=notebook_path
+            )
+            print("[AUTOINTERP] Notebook generation complete.")
+            
+        except Exception as nb_e:
+            logger.error(f"Failed to generate Jupyter notebook: {nb_e}")
+            print(f"[AUTOINTERP] Warning: Failed to generate Jupyter notebook: {nb_e}")
+
         return {
             "report_path": report_path,
+            "notebook_path": notebook_path,
             "conclusion": conclusion_type,
             "final_confidence": final_confidence
         }
+    
     except Exception as e:
         logger.error(f"Error generating report: {str(e)}")
         print(f"[AUTOINTERP] Error generating report: {str(e)}")
         
         # Create a simple markdown report as fallback
+        # task_name is now safely defined at the top of the function
         simple_report = f"# Interpretability Report: {task_name}\n\n"
         simple_report += f"## Question\n"
         

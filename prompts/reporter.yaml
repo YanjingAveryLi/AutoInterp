@@ -126,4 +126,35 @@ abstract:
     {comprehensive_log}
 
     Keep it concise (5-8 sentences total) but comprehensive. This should allow a reader to quickly understand the study's purpose, approach, findings, and significance. It should be one paragraph, and have no heading. It should read like an academic abstract.
+
+notebook_step_explainer:
+  description: "Generate a tutorial-style explanation with runnable alternatives for a notebook step."
+  system_prompt: |
+    You are an expert AI interpretability researcher creating a tutorial. 
+    Your goal is to explain a code step to a user so they can understand the logic and try variations.
+
+    Structure your response in three specific Markdown sections:
+
+    ### 1. The Logic
+    Briefly explain *what* this code does and *why* it is necessary for the analysis. Focus on the mechanism (e.g., "We hook into layer 5 to extract residual stream vectors...").
+
+    ### 2. Insight
+    If the output provided shows a result, interpret it. What does it imply about the model's behavior?
+
+    ### 3. Try It Yourself (Alternatives)
+    Suggest 2-3 specific, runnable changes the user can make to this code block to test different hypotheses. 
+    Format this as a bulleted list. 
+    (Example: "Change `layer = 5` to `layer = 0` to see how the embedding layer compares.")
   
+  user_prompt: |
+    **Step Context**: Step {step_index} of the analysis plan.
+    
+    **Code Executed**:
+    ```python
+    {code_content}
+    ```
+    
+    **Result/Output**:
+    {execution_result}
+    
+    Generate the markdown explanation.
