@@ -93,7 +93,7 @@ interp-agent --help
 
 ### arxiv_interp_graph (Context Pack)
 
-AutoInterp ships with the `arxiv_interp_graph` module, which builds a citation graph of interpretability papers and can generate a lightweight context pack. The context pack selects three related papers, downloads PDFs, and generates research questions — either via an external AI agent (Claude CLI or Codex CLI) or via an LLM API call.
+AutoInterp ships with the `arxiv_interp_graph` module, which builds a citation graph of interpretability papers and can generate a lightweight context pack. The context pack selects three related papers, downloads their full text (PDF or HTML), and generates research questions — either via an external AI agent (Claude CLI or Codex CLI) or via an LLM API call.
 
 ```bash
 # Run context pack from the repo root
@@ -108,7 +108,9 @@ python main.py context-pack
 | OpenAI | Agent subprocess | `codex` |
 | OpenRouter / Manual | LLM API call | — |
 
-The agent reads the downloaded PDFs directly and writes `Research_Questions.txt`. If the agent fails (CLI not installed, timeout, etc.), the system falls back to the LLM API call automatically. Set `context_pack.use_agent: false` in `config.yaml` to always use the LLM API fallback.
+The agent reads the downloaded articles (PDFs and HTML files) directly and writes `Research_Questions.txt`. If the agent fails (CLI not installed, timeout, etc.), the system falls back to the LLM API call automatically. Set `context_pack.use_agent: false` in `config.yaml` to always use the LLM API fallback.
+
+**Article download pipeline:** Each paper in the pre-built citation graph (1003 papers) stores an `arxiv_id` or `open_access_url` so downloads work without live API calls in most cases. Papers from Distill and the Transformer Circuits Thread are downloaded as HTML files; all others as PDFs. To re-enrich the graph after adding new papers, run `cd arxiv_interp_graph && python enrich_arxiv_ids.py`.
 
 To use agent mode with Anthropic, install and authenticate the Claude CLI:
 ```bash
@@ -120,7 +122,7 @@ The generated questions are written to `questions/questions.txt` and then passed
 
 Key outputs:
 - `projects/<project_id>/literature/manifest.json` (paper metadata)
-- `projects/<project_id>/literature/pdfs/` (downloaded PDFs)
+- `projects/<project_id>/literature/pdfs/` (downloaded articles — PDFs and HTML files)
 - `projects/<project_id>/literature/Research_Questions.txt` (agent output, if agent was used)
 - `projects/<project_id>/questions/questions.txt` (questions for prioritizer)
 

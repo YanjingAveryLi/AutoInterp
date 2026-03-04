@@ -19,7 +19,7 @@ Environment variables: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KE
 
 ### Pipeline Flow (`main.py` → `streamlined_pipeline()`)
 
-1. **Context Pack** (optional) — sample 3 papers from citation graph, download PDFs to `literature/`, generate research questions
+1. **Context Pack** (optional) — sample 3 papers from citation graph, download articles (PDF or HTML) to `literature/`, generate research questions
 2. **Question Generation** — LLM writes candidate research questions (skipped if context pack produced questions)
 3. **Question Prioritization** — LLM selects best question, extracts TITLE, renames project dir (always runs)
 4. **Iterative Analysis** — plan → generate code → execute in sandbox → evaluate → repeat until confident
@@ -34,7 +34,24 @@ When `context_pack.enabled: true` in `config.yaml`, the system builds a 3-paper 
 - **OpenAI** → runs `codex` CLI agent (subprocess with `-s workspace-write`)
 - **Other/fallback** → direct LLM API call via `_generate_question_llm()`
 
-The agent reads PDFs from `literature/pdfs/` and writes `Research_Questions.txt`. Output is copied to `questions/questions.txt` and the prioritizer always runs afterward.
+The agent reads articles from `literature/pdfs/` (PDFs and HTML files) and writes `Research_Questions.txt`. Output is copied to `questions/questions.txt` and the prioritizer always runs afterward.
+
+### Article Download Pipeline
+
+Each paper in the citation graph stores download metadata to avoid live API calls:
+
+| Source | Coverage | Method |
+|--------|----------|--------|
+| `arxiv_id` | 937/1003 (93%) | Construct `https://arxiv.org/pdf/{id}.pdf` directly |
+| `open_access_url` | 16/1003 | Stored URL from S2 `openAccessPdf` (Distill, journals) |
+| S2 API fallback | 49/1003 | Live API call at download time |
+
+HTML articles (Distill, Transformer Circuits Thread) are saved as `.html` files alongside PDFs. The agent prompt and LLM fallback both handle both formats.
+
+To re-enrich the graph after adding new papers:
+```bash
+cd arxiv_interp_graph && python enrich_arxiv_ids.py
+```
 
 **Prerequisites for agent mode:** The `claude` CLI must be installed and authenticated:
 ```bash
@@ -63,8 +80,9 @@ Agent logic lives in `arxiv_interp_graph/context_pack/agent_questions.py`.
 | `arxiv_interp_graph/context_pack/` | Context pack: sampling, download, agent questions, run |
 | `arxiv_interp_graph/context_pack/agent_questions.py` | CLI agent subprocess invocation |
 | `arxiv_interp_graph/context_pack/run.py` | Context pack orchestration + LLM fallback |
-| `arxiv_interp_graph/context_pack/download.py` | PDF download + manifest writing |
+| `arxiv_interp_graph/context_pack/download.py` | Article download (PDF + HTML) + manifest writing |
 | `question_generator_prompt.txt` | Prompt template for CLI agent (uses `(dir)` placeholder) |
+| `arxiv_interp_graph/enrich_arxiv_ids.py` | Batch-enrich graph with arxiv_id + open_access_url |
 | `.last_llm.json` | Persisted provider/model selection from last run |
 | `prompts/*.yaml` | Agent-specific prompt templates |
 
@@ -74,7 +92,7 @@ Each run creates `projects/<project_id>/` with:
 ```
 literature/           # Context pack outputs (when enabled)
   manifest.json       # Paper metadata
-  pdfs/               # Downloaded PDFs
+  pdfs/               # Downloaded articles (PDFs and HTML files)
   Research_Questions.txt  # Agent-generated questions
 questions/            # Question generation + prioritization
   questions.txt       # Generated or context-pack questions
