@@ -81,7 +81,7 @@ Agent logic lives in `arxiv_interp_graph/context_pack/agent_questions.py`.
 | `arxiv_interp_graph/context_pack/agent_questions.py` | CLI agent subprocess invocation |
 | `arxiv_interp_graph/context_pack/run.py` | Context pack orchestration + LLM fallback |
 | `arxiv_interp_graph/context_pack/download.py` | Article download (PDF + HTML) + manifest writing |
-| `question_generator_prompt.txt` | Prompt template for CLI agent (uses `(dir)` placeholder) |
+| `prompts/question_manager.yaml` | All question prompts (generator, prioritizer, agent question generator) |
 | `arxiv_interp_graph/enrich_arxiv_ids.py` | Batch-enrich graph with arxiv_id + open_access_url |
 | `.last_llm.json` | Persisted provider/model selection from last run |
 | `prompts/*.yaml` | Agent-specific prompt templates |

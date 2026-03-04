@@ -2102,11 +2102,9 @@ async def streamlined_pipeline(framework: Dict[str, Any]) -> Dict[str, Any]:
                         agent_timeout = ctx_cfg.get("agent_timeout", 600)
 
                         if use_agent and provider in ("anthropic", "openai"):
-                            prompt_path = PACKAGE_ROOT / "question_generator_prompt.txt"
-                            if prompt_path.exists():
-                                prompt_template = prompt_path.read_text(encoding="utf-8")
-                            else:
-                                prompt_template = "There are pdfs of scientific articles in the directory (dir). Read them and devise three research questions about LLM interpretability. Write them to Research_Questions.txt"
+                            prompt_template = config.get("prompts", {}).get("question_manager", {}).get("agent_question_generator", {}).get("prompt_template", "")
+                            if not prompt_template:
+                                prompt_template = "There are scientific articles in the directory (dir). Read them and devise three research questions about LLM interpretability. Write them to Research_Questions.txt"
                             question_text = run_agent_question_generation(
                                 provider=provider,
                                 literature_dir=literature_dir,
