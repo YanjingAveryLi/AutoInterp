@@ -28,6 +28,8 @@ context_pack:
   graph: null   # null = use arxiv_interp_graph/output/graph_state.json
   seed_id: null
   seed: null   # null = different papers each run; set e.g. 42 for reproducibility
+  use_agent: true       # use CLI agent (claude/codex) for question generation; false = LLM API call
+  agent_timeout: 600    # seconds to wait for agent CLI subprocess
 
 # Model to analyze
 model:

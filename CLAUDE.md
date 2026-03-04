@@ -1,0 +1,93 @@
+# CLAUDE.md
+
+## Project Overview
+
+AutoInterp is an automated mechanistic interpretability research framework. It takes a research question as input and produces a research report with original analyses, visualizations, and interpretation. Each step of the research process is executed by an LLM agent.
+
+## Quick Start
+
+```bash
+pip install -r requirements.txt
+python main.py          # interactive provider selection, then full pipeline
+python main.py run      # same as above
+python main.py context-pack  # run context pack only (no full pipeline)
+```
+
+Environment variables: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, `HF_TOKEN` (set whichever provider you use).
+
+## Key Architecture
+
+### Pipeline Flow (`main.py` → `streamlined_pipeline()`)
+
+1. **Context Pack** (optional) — sample 3 papers from citation graph, download PDFs to `literature/`, generate research questions
+2. **Question Generation** — LLM writes candidate research questions (skipped if context pack produced questions)
+3. **Question Prioritization** — LLM selects best question, extracts TITLE, renames project dir (always runs)
+4. **Iterative Analysis** — plan → generate code → execute in sandbox → evaluate → repeat until confident
+5. **Visualization** — plan and generate visualizations for analysis results
+6. **Report Generation** — produce final markdown/HTML report
+
+### Context Pack Question Generation
+
+When `context_pack.enabled: true` in `config.yaml`, the system builds a 3-paper pack from `arxiv_interp_graph/output/graph_state.json` and generates questions. The strategy depends on the LLM provider:
+
+- **Anthropic** → runs `claude` CLI agent (subprocess with `--dangerously-skip-permissions`)
+- **OpenAI** → runs `codex` CLI agent (subprocess with `-s workspace-write`)
+- **Other/fallback** → direct LLM API call via `_generate_question_llm()`
+
+The agent reads PDFs from `literature/pdfs/` and writes `Research_Questions.txt`. Output is copied to `questions/questions.txt` and the prioritizer always runs afterward.
+
+**Prerequisites for agent mode:** The `claude` CLI must be installed and authenticated:
+```bash
+curl -fsSL https://claude.ai/install.sh | bash   # install
+claude                                             # first run: follow login prompts
+```
+For OpenAI, the `codex` CLI must be installed and authenticated separately.
+
+Config fields:
+- `context_pack.use_agent` (default `true`) — use CLI agent; `false` = always use LLM API
+- `context_pack.agent_timeout` (default `600`) — subprocess timeout in seconds
+
+Agent logic lives in `arxiv_interp_graph/context_pack/agent_questions.py`.
+
+**Smoke-tested:** The agent subprocess path (Anthropic/`claude`) has been verified end-to-end — prompt substitution, subprocess invocation, PDF reading by the agent, `Research_Questions.txt` creation, and content retrieval all work. The full pipeline path requires `arxiv_interp_graph/output/graph_state.json` to exist (build it with `python arxiv_interp_graph/cli.py build`).
+
+## Important File Locations
+
+| File | Purpose |
+|------|---------|
+| `main.py` | Main orchestrator, CLI entry point, `streamlined_pipeline()` |
+| `config.yaml` | All configuration (providers, agents, execution, context pack) |
+| `core/llm_interface.py` | LLM API abstraction (Anthropic, OpenAI, OpenRouter) |
+| `core/utils.py` | `PathResolver` singleton, utilities |
+| `questions/question_manager.py` | Question file I/O, prioritization |
+| `arxiv_interp_graph/context_pack/` | Context pack: sampling, download, agent questions, run |
+| `arxiv_interp_graph/context_pack/agent_questions.py` | CLI agent subprocess invocation |
+| `arxiv_interp_graph/context_pack/run.py` | Context pack orchestration + LLM fallback |
+| `arxiv_interp_graph/context_pack/download.py` | PDF download + manifest writing |
+| `question_generator_prompt.txt` | Prompt template for CLI agent (uses `(dir)` placeholder) |
+| `.last_llm.json` | Persisted provider/model selection from last run |
+| `prompts/*.yaml` | Agent-specific prompt templates |
+
+## Project Output Structure
+
+Each run creates `projects/<project_id>/` with:
+```
+literature/           # Context pack outputs (when enabled)
+  manifest.json       # Paper metadata
+  pdfs/               # Downloaded PDFs
+  Research_Questions.txt  # Agent-generated questions
+questions/            # Question generation + prioritization
+  questions.txt       # Generated or context-pack questions
+  prioritized_question.txt  # Selected question (from prioritizer)
+analysis_scripts/     # Generated Python analysis code
+analysis_results/     # Execution outputs
+visualizations/       # Generated plots
+reports/              # Final report
+```
+
+## Conventions
+
+- `PathResolver` is a singleton; use `path_resolver.ensure_path("component")` to get/create project subdirectories
+- LLM config is read from `config.yaml` at startup and persisted to `.last_llm.json`
+- The `arxiv_interp_graph` directory is added to `sys.path` at runtime so its subpackages can be imported directly (e.g., `from context_pack.run import ...`)
+- Agent subprocess commands run with `cwd=literature_dir` so the agent sees PDFs relative to its working directory

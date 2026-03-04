@@ -2045,7 +2045,6 @@ async def streamlined_pipeline(framework: Dict[str, Any]) -> Dict[str, Any]:
     print("="*80 + "\n")
 
     use_context_pack_question = False
-    context_pack_active_question = None
 
     try:
         # Context pack (optional): seed + forward/backward -> 3 papers -> one question
@@ -2061,37 +2060,77 @@ async def streamlined_pipeline(framework: Dict[str, Any]) -> Dict[str, Any]:
                 if not graph_path.is_absolute():
                     graph_path = (PACKAGE_ROOT / graph_path).resolve()
                 questions_dir = path_resolver.ensure_path("questions")
+                literature_dir = path_resolver.ensure_path("literature")
                 if graph_path.exists():
-                    from context_pack.run import run_context_pack
+                    from context_pack.sampling import build_context_pack
+                    from context_pack.download import download_context_pack_pdfs, write_manifest
+                    from context_pack.agent_questions import run_agent_question_generation
+                    from context_pack.run import _generate_question_llm
                     from api_client import SemanticScholarClient
                     from topic_package.llm_client import get_llm_generate_fn
+                    try:
+                        from topic_mining.graph_loader import load_graph_for_topic_mining
+                    except ImportError:
+                        from arxiv_interp_graph.topic_mining.graph_loader import load_graph_for_topic_mining
+
                     s2_client = SemanticScholarClient()
-                    llm_config = config.get("llm") or {}
-                    if not llm_config and (PACKAGE_ROOT / ".last_llm.json").exists():
-                        with open(PACKAGE_ROOT / ".last_llm.json") as f:
-                            llm_config = json.load(f)
-                    llm_generate_fn = None
-                    if llm_config and (llm_config.get("provider") or llm_config.get("model")):
-                        llm_generate_fn = get_llm_generate_fn(
-                            provider=llm_config.get("provider"),
-                            model=llm_config.get("model"),
-                        )
-                    result = run_context_pack(
-                        graph_path=graph_path,
-                        output_dir=questions_dir,
+
+                    # Load graph and sample 3 papers
+                    G = load_graph_for_topic_mining(graph_path)
+                    papers = build_context_pack(
+                        G,
                         seed_id=ctx_cfg.get("seed_id"),
                         s2_client=s2_client,
                         seed=ctx_cfg.get("seed"),
-                        download_pdfs=True,
-                        llm_generate_fn=llm_generate_fn,
                     )
-                    question_text = result.get("question_text") or ""
+
+                    question_text = ""
+                    if len(papers) >= 3:
+                        # Download PDFs to literature/pdfs/
+                        papers = download_context_pack_pdfs(papers, literature_dir, s2_client)
+                        write_manifest(papers, literature_dir)
+
+                        # Determine provider
+                        llm_config = config.get("llm") or {}
+                        if not llm_config and (PACKAGE_ROOT / ".last_llm.json").exists():
+                            with open(PACKAGE_ROOT / ".last_llm.json") as f:
+                                llm_config = json.load(f)
+                        provider = (llm_config.get("provider") or "").lower()
+
+                        # Try agent-based generation if enabled and provider supports it
+                        use_agent = ctx_cfg.get("use_agent", True)
+                        agent_timeout = ctx_cfg.get("agent_timeout", 600)
+
+                        if use_agent and provider in ("anthropic", "openai"):
+                            prompt_path = PACKAGE_ROOT / "question_generator_prompt.txt"
+                            if prompt_path.exists():
+                                prompt_template = prompt_path.read_text(encoding="utf-8")
+                            else:
+                                prompt_template = "There are pdfs of scientific articles in the directory (dir). Read them and devise three research questions about LLM interpretability. Write them to Research_Questions.txt"
+                            question_text = run_agent_question_generation(
+                                provider=provider,
+                                literature_dir=literature_dir,
+                                prompt_template=prompt_template,
+                                timeout=agent_timeout,
+                            ) or ""
+
+                        # Fallback to LLM API call if agent didn't produce output
+                        if not question_text:
+                            if provider in ("anthropic", "openai"):
+                                print("[AUTOINTERP] Agent generation failed; falling back to LLM API call.")
+                            llm_generate_fn = None
+                            if llm_config and (llm_config.get("provider") or llm_config.get("model")):
+                                llm_generate_fn = get_llm_generate_fn(
+                                    provider=llm_config.get("provider"),
+                                    model=llm_config.get("model"),
+                                )
+                            if llm_generate_fn:
+                                question_text = _generate_question_llm(papers, llm_generate_fn) or ""
+
                     if question_text:
-                        (questions_dir / "prioritized_question.txt").write_text(question_text, encoding="utf-8")
                         (questions_dir / "questions.txt").write_text(question_text, encoding="utf-8")
-                        context_pack_active_question = question_text
                         use_context_pack_question = True
-                        print(f"[AUTOINTERP] Context pack done: 3 papers, manifest + PDFs in questions/, question in prioritized_question.txt")
+                        print(f"[AUTOINTERP] Context pack done: 3 papers, manifest + PDFs in literature/, question in questions/questions.txt")
                     else:
                         print("[AUTOINTERP] Context pack produced no question; falling back to normal question generation.")
                 else:
@@ -2102,7 +2141,7 @@ async def streamlined_pipeline(framework: Dict[str, Any]) -> Dict[str, Any]:
                 traceback.print_exc()
                 print("[AUTOINTERP] Falling back to normal question generation.")
 
-        # 1. Question Generation
+        # 1. Question Generation (skipped if context pack produced questions)
         if not use_context_pack_question:
             await generate_questions(
                 llm_interface=framework["llm_interface"],
@@ -2110,23 +2149,15 @@ async def streamlined_pipeline(framework: Dict[str, Any]) -> Dict[str, Any]:
                 config=config,
                 logger=logger
             )
-            # 2. Question Prioritization
-            active_question = await prioritize_questions(
-                question_manager=framework["question_manager"],
-                llm_interface=framework["llm_interface"],
-                config=config,
-                logger=logger,
-                evaluator=framework["evaluator"]
-            )
-        else:
-            active_question = context_pack_active_question
-            if not active_question:
-                prioritized_path = framework["question_manager"].storage_dir / "prioritized_question.txt"
-                if prioritized_path.exists():
-                    active_question = prioritized_path.read_text(encoding="utf-8")
-            if not active_question:
-                active_question = "No question available"
-            logger.info("Using question from context pack (skipped generate_questions + prioritize_questions).")
+
+        # 2. Question Prioritization (always runs)
+        active_question = await prioritize_questions(
+            question_manager=framework["question_manager"],
+            llm_interface=framework["llm_interface"],
+            config=config,
+            logger=logger,
+            evaluator=framework["evaluator"]
+        )
 
         # 3. Iterative Analysis and Evaluation
         all_analyses, all_evaluations = await iterative_analysis(

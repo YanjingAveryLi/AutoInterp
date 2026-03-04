@@ -64,10 +64,11 @@ HF_TOKEN=your_key_here
 Optionally configure `config.yaml` with custom settings:
    - Task details (name, description)
    - Model configuration
-   - LLM provider and model 
+   - LLM provider and model
    - Analysis parameters
    - Visualization settings
    - Resource limits
+   - Context pack settings (`context_pack.use_agent`, `context_pack.agent_timeout`)
 
 ## Usage
 
@@ -92,17 +93,36 @@ interp-agent --help
 
 ### arxiv_interp_graph (Context Pack)
 
-AutoInterp ships with the `arxiv_interp_graph` module, which builds a citation graph of interpretability papers and can generate a lightweight context pack. The context pack selects three related papers, downloads PDFs, and (optionally) uses an LLM to propose a single, testable research question.
+AutoInterp ships with the `arxiv_interp_graph` module, which builds a citation graph of interpretability papers and can generate a lightweight context pack. The context pack selects three related papers, downloads PDFs, and generates research questions — either via an external AI agent (Claude CLI or Codex CLI) or via an LLM API call.
 
 ```bash
 # Run context pack from the repo root
 python main.py context-pack
 ```
 
-Key outputs are written under `projects/<project_id>/questions/`:
-- `manifest.json` (paper metadata)
-- `pdfs/` (downloaded PDFs)
-- `context_pack_question.txt` (LLM-generated question, if enabled)
+**Question generation strategy:** When the context pack is enabled, the system picks a strategy based on the selected LLM provider:
+
+| Provider | Strategy | CLI tool |
+|----------|----------|----------|
+| Anthropic | Agent subprocess | `claude` |
+| OpenAI | Agent subprocess | `codex` |
+| OpenRouter / Manual | LLM API call | — |
+
+The agent reads the downloaded PDFs directly and writes `Research_Questions.txt`. If the agent fails (CLI not installed, timeout, etc.), the system falls back to the LLM API call automatically. Set `context_pack.use_agent: false` in `config.yaml` to always use the LLM API fallback.
+
+To use agent mode with Anthropic, install and authenticate the Claude CLI:
+```bash
+curl -fsSL https://claude.ai/install.sh | bash   # install
+claude                                             # first run: follow login prompts
+```
+
+The generated questions are written to `questions/questions.txt` and then passed through the normal question prioritizer, which selects the best question and extracts a project title.
+
+Key outputs:
+- `projects/<project_id>/literature/manifest.json` (paper metadata)
+- `projects/<project_id>/literature/pdfs/` (downloaded PDFs)
+- `projects/<project_id>/literature/Research_Questions.txt` (agent output, if agent was used)
+- `projects/<project_id>/questions/questions.txt` (questions for prioritizer)
 
 ### Sandboxed Execution with Docker
 
