@@ -69,6 +69,7 @@ Optionally configure `config.yaml` with custom settings:
    - Visualization settings
    - Resource limits
    - Context pack settings (`context_pack.use_agent`, `context_pack.agent_timeout`)
+   - Pipeline UI settings (`ui.html_dashboard`, `ui.dashboard_refresh`, `ui.auto_open_browser`)
 
 ## Usage
 
@@ -145,6 +146,8 @@ Key outputs:
 ├── __main__.py                 # Enables `python -m AutoInterp`
 ├── core/
 │   ├── llm_interface.py        # Manages cognitive loop and interactions with LLM
+│   ├── pipeline_ui.py          # Pipeline UI — step tracking and HTML dashboard
+│   ├── dashboard_template.py   # HTML template and render helpers for dashboard
 │   └── utils.py                # General utilities and path resolution
 │
 ├── questions/
@@ -210,6 +213,24 @@ Key outputs:
 ### Reporting
 
 - **Report Generator**: Produces comprehensive reports with findings, visualizations, and insights in multiple formats
+
+### Pipeline UI & HTML Dashboard
+
+During each run, AutoInterp writes a self-contained `dashboard.html` file to the project directory. The dashboard provides:
+
+- **Per-step tabs** — Questions, Prioritize, Analysis, Visualization, Report — each showing all LLM prompts and responses for that stage
+- **Auto-refresh** — the page polls for updates during the run and preserves your tab state, scroll position, and expanded/collapsed sections
+- **Analysis grouping** — iterative analysis calls are grouped by iteration and attempt, with a color gradient from gold to burnt umber
+- **Collapsible sections** — system prompts, user prompts, and assistant responses are each collapsible (all collapsed by default)
+
+The dashboard is opened automatically in your browser when the pipeline starts. After the run completes, auto-refresh is removed so the final file is a static snapshot. Configure dashboard behavior in `config.yaml` under the `ui:` section:
+
+```yaml
+ui:
+  html_dashboard: true     # Write dashboard.html to project dir
+  dashboard_refresh: 5     # Refresh interval in seconds
+  auto_open_browser: true  # Open in browser on pipeline start
+```
 
 ## Contributing
 

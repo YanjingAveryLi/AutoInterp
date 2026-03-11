@@ -68,13 +68,35 @@ Agent logic lives in `arxiv_interp_graph/context_pack/agent_questions.py`.
 
 **Smoke-tested:** The agent subprocess path (Anthropic/`claude`) has been verified end-to-end — prompt substitution, subprocess invocation, PDF reading by the agent, `Research_Questions.txt` creation, and content retrieval all work. The full pipeline path requires `arxiv_interp_graph/output/graph_state.json` to exist (build it with `python arxiv_interp_graph/cli.py build`).
 
+### Pipeline UI (`core/pipeline_ui.py` + `core/dashboard_template.py`)
+
+The pipeline produces two forms of output:
+
+1. **CLI terminal** — the original colorful verbose ANSI output from `LLMInterface` (always printed)
+2. **HTML dashboard** — a self-contained, auto-refreshing `dashboard.html` written to the project directory
+
+`PipelineUI` is created in `async_main()` and attached to `LLMInterface.pipeline_ui`. Every `generate()` call records an `LLMInteraction` and rewrites the dashboard. Step lifecycle calls (`step_start`, `step_complete`, etc.) are made from `streamlined_pipeline()`.
+
+The dashboard uses a dark "Civilization 2" theme with per-step color coding: green (questions), blue (prioritize), gold→burnt umber gradient (analysis), teal (visualization), coral (report). Tabs double as a progress bar. All prompt/response sections are collapsed by default. Auto-refresh uses `fetch()` + DOM diffing to preserve tab state, scroll position, and open/closed details.
+
+Config (`config.yaml`):
+```yaml
+ui:
+  rich_terminal: true      # Enable Rich library for terminal panels (unused currently — verbose output always prints)
+  html_dashboard: true     # Write dashboard.html to project dir
+  dashboard_refresh: 5     # Auto-refresh interval in seconds
+  auto_open_browser: true  # Open dashboard in browser on pipeline start
+```
+
 ## Important File Locations
 
 | File | Purpose |
 |------|---------|
 | `main.py` | Main orchestrator, CLI entry point, `streamlined_pipeline()` |
-| `config.yaml` | All configuration (providers, agents, execution, context pack) |
+| `config.yaml` | All configuration (providers, agents, execution, context pack, UI) |
 | `core/llm_interface.py` | LLM API abstraction (Anthropic, OpenAI, OpenRouter) |
+| `core/pipeline_ui.py` | `PipelineUI` class — step tracking, LLM interaction recording, HTML dashboard |
+| `core/dashboard_template.py` | HTML template, CSS, JS, and render helpers for the dashboard |
 | `core/utils.py` | `PathResolver` singleton, utilities |
 | `questions/question_manager.py` | Question file I/O, prioritization |
 | `arxiv_interp_graph/context_pack/` | Context pack: sampling, download, agent questions, run |
@@ -101,6 +123,7 @@ analysis_scripts/     # Generated Python analysis code
 analysis_results/     # Execution outputs
 visualizations/       # Generated plots
 reports/              # Final report
+dashboard.html        # Auto-refreshing HTML dashboard (written during run)
 ```
 
 ## Conventions
