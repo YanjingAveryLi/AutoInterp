@@ -35,6 +35,14 @@ from AutoInterp.analysis.analysis_executor import AnalysisExecutor
 from AutoInterp.analysis.analysis_planner import AnalysisPlanner
 from AutoInterp.analysis.evaluator import Evaluator
 from AutoInterp.analysis.visualization_evaluator import VisualizationEvaluator
+from AutoInterp.analysis.agent_analysis import (
+    setup_analysis_workspace,
+    load_analysis_prompt_template,
+    _build_analysis_prompt,
+    run_analysis_agent,
+    read_agent_outputs,
+    read_confidence,
+)
 from AutoInterp.reporting.report_generator import ReportGenerator
 
 def select_provider_and_model() -> Tuple[str, str]:
@@ -1225,26 +1233,276 @@ async def iterative_analysis(
             
     return all_analyses, all_evaluations
 
+
+async def iterative_analysis_agent(
+    active_question: str,
+    config: Dict[str, Any],
+    logger: Any,
+    max_iterations: int = 3,
+    confidence_threshold: float = 0.85,
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """
+    Perform iterative analysis using a CLI agent subprocess (claude or codex).
+
+    Each iteration launches a single agent invocation that autonomously plans,
+    writes code, executes, debugs, evaluates, and updates confidence.
+
+    Returns:
+        Tuple of (all_analyses, all_evaluations) — same shape as
+        ``iterative_analysis()`` for downstream compatibility.
+    """
+    logger.info(
+        "Starting agent-based iterative analysis. max_iterations=%d, threshold=%.2f",
+        max_iterations,
+        confidence_threshold,
+    )
+    print(f"[AUTOINTERP] Beginning agent-based iterative analysis")
+    print(
+        f"[AUTOINTERP] Will continue until confidence >= {confidence_threshold} "
+        f"or {max_iterations} iterations completed"
+    )
+
+    path_resolver = PathResolver()
+    analysis_root = path_resolver.ensure_analysis_dir()
+
+    # Determine provider
+    llm_config = config.get("llm", {})
+    provider = (llm_config.get("provider") or "").lower()
+
+    # Model info from config
+    model_cfg = config.get("model", {})
+    model_name = model_cfg.get("name", "meta-llama/Llama-3.2-1B-Instruct")
+    model_path = model_cfg.get("tokenizer", model_name)
+
+    # Load prompt template
+    try:
+        prompt_template = load_analysis_prompt_template()
+    except FileNotFoundError as exc:
+        logger.error("Could not load analysis prompt template: %s", exc)
+        print(f"[AUTOINTERP] ERROR: {exc}")
+        return [], []
+
+    # Agent timeout
+    agent_timeout = config.get("analysis", {}).get(
+        "agent_timeout",
+        config.get("agents", {}).get("analysis_agent", {}).get("timeout", 1800),
+    )
+
+    all_analyses: List[Dict[str, Any]] = []
+    all_evaluations: List[Dict[str, Any]] = []
+    consecutive_failures = 0
+
+    # Get optional PipelineUI
+    pipeline_ui = config.get("_pipeline_ui_ref")
+
+    for iteration in range(1, max_iterations + 1):
+        # Read current confidence
+        conf_data = read_confidence(analysis_root)
+        current_confidence = conf_data.get("current_confidence", 0.0)
+
+        print(f"\n[AUTOINTERP] === ANALYSIS AGENT ITERATION {iteration}/{max_iterations} ===")
+        print(f"[AUTOINTERP] Current confidence: {current_confidence:.2f}")
+
+        # Setup workspace
+        iter_dir = setup_analysis_workspace(path_resolver, active_question, iteration)
+        logger.info("Workspace ready: %s", iter_dir)
+
+        # Build prompt
+        prompt_text = _build_analysis_prompt(
+            iteration_n=iteration,
+            analysis_root=analysis_root,
+            prompt_template=prompt_template,
+            model_name=model_name,
+            model_path=model_path,
+        )
+
+        # Run agent
+        import time as _time
+        _agent_start = _time.time()
+        agent_result = run_analysis_agent(
+            provider=provider,
+            analysis_dir=iter_dir,
+            prompt_text=prompt_text,
+            timeout=agent_timeout,
+        )
+        _agent_duration = _time.time() - _agent_start
+
+        # Read outputs
+        outputs = read_agent_outputs(analysis_root, iteration)
+        new_conf = read_confidence(analysis_root)
+        new_confidence = new_conf.get("current_confidence", current_confidence)
+
+        # Build analysis dict (compatible with downstream)
+        script_content = "\n\n".join(s["content"] for s in outputs["scripts"]) if outputs["scripts"] else ""
+        analysis_dict: Dict[str, Any] = {
+            "success": agent_result["success"],
+            "stdout": agent_result.get("stdout", ""),
+            "stderr": agent_result.get("stderr", ""),
+            "script_path": str(iter_dir),
+            "script_content": script_content,
+            "execution_dir": str(iter_dir),
+            "execution_time_formatted": f"{_agent_duration:.0f}s",
+            "agent_mode": True,
+        }
+        all_analyses.append(analysis_dict)
+
+        # Build evaluation dict (compatible with downstream)
+        evaluation_dict: Dict[str, Any] = {
+            "raw_evaluation": outputs.get("evaluation", ""),
+            "new_confidence": new_confidence,
+            "supports_question": new_confidence >= 0.5,
+            "confidence_impact": new_confidence - current_confidence,
+            "key_insights": [],
+            "follow_up_recommendations": [],
+            "agent_mode": True,
+        }
+        all_evaluations.append(evaluation_dict)
+
+        # Record in dashboard
+        if pipeline_ui:
+            pipeline_ui.llm_call_complete(
+                agent_name="analysis_agent",
+                display_name=f"Analysis Agent (Iteration {iteration})",
+                prompt=prompt_text[:2000] + ("..." if len(prompt_text) > 2000 else ""),
+                system_message=None,
+                response=outputs.get("evaluation", agent_result.get("stdout", ""))[:3000],
+                model=f"{provider} CLI agent",
+                provider=provider,
+                temperature=0,
+                max_tokens=0,
+                duration_seconds=_agent_duration,
+                step_id="iterative_analysis",
+                iteration_number=iteration,
+            )
+
+        # Log to comprehensive log
+        project_dir = path_resolver.get_project_dir()
+        if outputs.get("evaluation"):
+            log_to_comprehensive_log(
+                project_dir,
+                outputs["evaluation"],
+                f"ANALYSIS AGENT EVALUATION (Iteration {iteration})",
+            )
+        if script_content:
+            log_to_comprehensive_log(
+                project_dir,
+                script_content,
+                f"ANALYSIS AGENT SCRIPTS (Iteration {iteration})",
+            )
+
+        # Track consecutive failures for fallback
+        if not agent_result["success"] and not outputs.get("evaluation"):
+            consecutive_failures += 1
+            logger.warning(
+                "Agent iteration %d failed (consecutive failures: %d)",
+                iteration,
+                consecutive_failures,
+            )
+            print(f"[AUTOINTERP] Agent iteration {iteration} failed")
+            if consecutive_failures >= 2:
+                logger.warning("2 consecutive agent failures; stopping agent analysis.")
+                print("[AUTOINTERP] 2 consecutive agent failures. Stopping analysis.")
+                break
+        else:
+            consecutive_failures = 0
+            print(f"[AUTOINTERP] Agent iteration {iteration} complete. Confidence: {new_confidence:.2f}")
+
+        # Check confidence threshold
+        if new_confidence >= confidence_threshold:
+            logger.info("Reached confidence threshold: %.2f", new_confidence)
+            print(f"[AUTOINTERP] Reached confidence threshold: {new_confidence:.2f}")
+            print(f"[AUTOINTERP] Concluding analysis phase after {iteration} iterations")
+            break
+
+    return all_analyses, all_evaluations
+
+
+def _find_agent_analyses(path_resolver: PathResolver) -> List[Tuple[str, str, str]]:
+    """
+    Find analyses produced by the agent-based pipeline (analysis/analysis_N/ layout).
+
+    Returns:
+        List of tuples: (script_content, evaluation_content, analysis_name)
+        or empty list if the agent layout does not exist.
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+
+    analysis_root = path_resolver.get_analysis_dir()
+    if not analysis_root.exists():
+        return []
+
+    results = []
+    # Discover analysis_N directories
+    iter_dirs = []
+    for item in analysis_root.iterdir():
+        if item.is_dir() and item.name.startswith("analysis_"):
+            try:
+                n = int(item.name.split("_")[1])
+                iter_dirs.append((n, item))
+            except (ValueError, IndexError):
+                continue
+    iter_dirs.sort(key=lambda x: x[0])
+
+    for n, d in iter_dirs:
+        # Collect .py script content
+        scripts: List[str] = []
+        for f in sorted(d.iterdir()):
+            if f.is_file() and f.suffix == ".py":
+                try:
+                    scripts.append(f.read_text(encoding="utf-8", errors="replace"))
+                except Exception:
+                    pass
+
+        # Read evaluation file
+        eval_path = d / f"ANALYSIS_{n}_EVALUATION.md"
+        eval_content = ""
+        if eval_path.exists():
+            try:
+                eval_content = eval_path.read_text(encoding="utf-8", errors="replace")
+            except Exception:
+                pass
+
+        if scripts and eval_content:
+            combined_script = "\n\n".join(scripts)
+            results.append((combined_script, eval_content, f"analysis_{n}"))
+            logger.info(f"Agent layout: found analysis_{n} ({len(scripts)} scripts)")
+
+    if results:
+        logger.info(f"Agent layout: {len(results)} successful analyses")
+    return results
+
+
 def find_successful_analyses(path_resolver: PathResolver) -> List[Tuple[str, str, str]]:
     """
     Find all successful analyses and extract their script and output files.
-    
+
+    Checks the agent layout (analysis/analysis_N/) first; falls back to the
+    legacy layout (analysis_scripts/analysis_N/attempt_N/) if the agent
+    layout doesn't exist or is empty.
+
     Args:
         path_resolver: PathResolver for getting project paths
-        
+
     Returns:
         List of tuples: (analysis_script_content, analysis_output_content, analysis_name)
     """
     import logging
     logger = logging.getLogger(__name__)
-    
+
+    # Try agent layout first
+    agent_results = _find_agent_analyses(path_resolver)
+    if agent_results:
+        return agent_results
+
+    # Legacy layout
     successful_analyses = []
     analysis_scripts_dir = path_resolver.get_path("analysis_scripts")
-    
+
     if not analysis_scripts_dir.exists():
         logger.warning(f"Analysis scripts directory not found: {analysis_scripts_dir}")
         return successful_analyses
-        
+
     # Find all analysis_N directories
     analysis_dirs = []
     for item in analysis_scripts_dir.iterdir():
@@ -1256,16 +1514,16 @@ def find_successful_analyses(path_resolver: PathResolver) -> List[Tuple[str, str
             except (ValueError, IndexError):
                 logger.warning(f"Skipping malformed analysis directory: {item.name}")
                 continue
-    
+
     # Sort by analysis number
     analysis_dirs.sort(key=lambda x: x[0])
-    
+
     logger.info(f"Found {len(analysis_dirs)} analysis directories")
-    
+
     # For each analysis directory, find the highest attempt
     for analysis_num, analysis_dir in analysis_dirs:
         logger.info(f"Processing analysis_{analysis_num}")
-        
+
         # Find all attempt_N directories within this analysis
         attempt_dirs = []
         for item in analysis_dir.iterdir():
@@ -1277,21 +1535,21 @@ def find_successful_analyses(path_resolver: PathResolver) -> List[Tuple[str, str
                 except (ValueError, IndexError):
                     logger.warning(f"Skipping malformed attempt directory: {item.name}")
                     continue
-        
+
         if not attempt_dirs:
             logger.warning(f"No attempt directories found in {analysis_dir}")
             continue
-            
+
         # Sort by attempt number and get the highest one
         attempt_dirs.sort(key=lambda x: x[0])
         highest_attempt_num, highest_attempt_dir = attempt_dirs[-1]
-        
+
         logger.info(f"Using highest attempt: attempt_{highest_attempt_num} for analysis_{analysis_num}")
-        
+
         # Look for the required files in the highest attempt directory
         analysis_script_content = None
         analysis_output_content = None
-        
+
         # Find analysis_generator_*.txt file
         for file_path in highest_attempt_dir.iterdir():
             if file_path.is_file() and file_path.name.startswith("analysis_generator_") and file_path.suffix == ".txt":
@@ -1302,7 +1560,7 @@ def find_successful_analyses(path_resolver: PathResolver) -> List[Tuple[str, str
                     break
                 except Exception as e:
                     logger.warning(f"Error reading analysis script file {file_path}: {e}")
-        
+
         # Find stdout.txt file
         stdout_file = highest_attempt_dir / "stdout.txt"
         if stdout_file.exists():
@@ -1314,7 +1572,7 @@ def find_successful_analyses(path_resolver: PathResolver) -> List[Tuple[str, str
                 logger.warning(f"Error reading stdout.txt: {e}")
         else:
             logger.warning(f"stdout.txt not found in {highest_attempt_dir}")
-        
+
         # Only add if we found both required files
         if analysis_script_content and analysis_output_content:
             analysis_name = f"analysis_{analysis_num}"
@@ -1322,7 +1580,7 @@ def find_successful_analyses(path_resolver: PathResolver) -> List[Tuple[str, str
             logger.info(f"Successfully extracted files for {analysis_name}")
         else:
             logger.warning(f"Missing required files for analysis_{analysis_num} (script: {analysis_script_content is not None}, output: {analysis_output_content is not None})")
-    
+
     logger.info(f"Found {len(successful_analyses)} successful analyses with complete files")
     return successful_analyses
 
@@ -2218,18 +2476,45 @@ async def streamlined_pipeline(framework: Dict[str, Any]) -> Dict[str, Any]:
         # 3. Iterative Analysis and Evaluation
         if pipeline_ui:
             pipeline_ui.step_start("iterative_analysis")
-        all_analyses, all_evaluations = await iterative_analysis(
-            active_question=active_question,
-            analysis_generator=framework["analysis_generator"],
-            analysis_executor=framework["analysis_executor"],
-            analysis_planner=framework["analysis_planner"],
-            evaluator=framework["evaluator"],
-            question_manager=framework["question_manager"],
-            config=config,
-            logger=logger,
-            max_iterations=config.get("analysis", {}).get("max_iterations", 3),
-            confidence_threshold=config.get("analysis", {}).get("confidence_threshold", 0.8)
+
+        # Decide: agent mode vs legacy pipeline
+        import shutil as _shutil
+        analysis_cfg = config.get("analysis", {})
+        _use_agent = analysis_cfg.get("use_agent", False)
+        _provider = (config.get("llm", {}).get("provider") or "").lower()
+        _agent_available = (
+            _use_agent
+            and _provider in ("anthropic", "openai")
+            and _shutil.which("claude" if _provider == "anthropic" else "codex") is not None
         )
+
+        if _agent_available:
+            print("[AUTOINTERP] Using CLI agent for analysis")
+            all_analyses, all_evaluations = await iterative_analysis_agent(
+                active_question=active_question,
+                config=config,
+                logger=logger,
+                max_iterations=analysis_cfg.get("max_iterations", 3),
+                confidence_threshold=analysis_cfg.get("confidence_threshold", 0.85),
+            )
+        else:
+            if _use_agent and _provider in ("anthropic", "openai"):
+                cli_name = "claude" if _provider == "anthropic" else "codex"
+                print(f"[AUTOINTERP] Agent mode enabled but '{cli_name}' CLI not found; falling back to legacy pipeline")
+            elif _use_agent:
+                print(f"[AUTOINTERP] Agent mode not supported for provider '{_provider}'; using legacy pipeline")
+            all_analyses, all_evaluations = await iterative_analysis(
+                active_question=active_question,
+                analysis_generator=framework["analysis_generator"],
+                analysis_executor=framework["analysis_executor"],
+                analysis_planner=framework["analysis_planner"],
+                evaluator=framework["evaluator"],
+                question_manager=framework["question_manager"],
+                config=config,
+                logger=logger,
+                max_iterations=analysis_cfg.get("max_iterations", 3),
+                confidence_threshold=analysis_cfg.get("confidence_threshold", 0.8),
+            )
         if pipeline_ui:
             final_conf = all_evaluations[-1].get("new_confidence", 0.0) if all_evaluations else 0.0
             pipeline_ui.step_complete(

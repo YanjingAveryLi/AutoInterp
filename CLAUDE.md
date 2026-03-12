@@ -22,7 +22,7 @@ Environment variables: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KE
 1. **Context Pack** (optional) — sample 3 papers from citation graph, download articles (PDF or HTML) to `literature/`, generate research questions
 2. **Question Generation** — LLM writes candidate research questions (skipped if context pack produced questions)
 3. **Question Prioritization** — LLM selects best question, extracts TITLE, renames project dir (always runs)
-4. **Iterative Analysis** — plan → generate code → execute in sandbox → evaluate → repeat until confident
+4. **Iterative Analysis** — agent mode (default): CLI agent subprocess plans, codes, executes, debugs, evaluates autonomously; legacy mode: plan → generate code → execute in sandbox → evaluate → repeat until confident
 5. **Visualization** — plan and generate visualizations for analysis results
 6. **Report Generation** — produce final markdown/HTML report
 
@@ -68,6 +68,40 @@ Agent logic lives in `arxiv_interp_graph/context_pack/agent_questions.py`.
 
 **Smoke-tested:** The agent subprocess path (Anthropic/`claude`) has been verified end-to-end — prompt substitution, subprocess invocation, PDF reading by the agent, `Research_Questions.txt` creation, and content retrieval all work. The full pipeline path requires `arxiv_interp_graph/output/graph_state.json` to exist (build it with `python arxiv_interp_graph/cli.py build`).
 
+### Analysis Agent Mode (`analysis/agent_analysis.py`)
+
+When `analysis.use_agent: true` (default) and the provider is `anthropic` or `openai`, each analysis iteration is handled by a single CLI agent subprocess instead of the 4-module legacy pipeline. The agent autonomously plans, writes code, executes it, debugs failures, writes an evaluation, and updates a confidence tracker.
+
+**Directory layout (agent mode):**
+```
+analysis/
+  background/
+    Research_Question.md    # Copied from prioritized_question.txt
+    confidence.json         # Running confidence tracker
+  analysis_1/
+    ANALYSIS_1_PLAN.md
+    *.py                    # Analysis scripts (written + executed by agent)
+    *.png                   # Generated figures
+    ANALYSIS_1_EVALUATION.md
+  analysis_2/
+    ...
+```
+
+**Fallback rules:**
+- `analysis.use_agent: false` → always use legacy pipeline
+- Provider not `anthropic`/`openai` → legacy pipeline
+- CLI binary not found → legacy pipeline with warning
+- 2 consecutive agent failures → stop analysis early
+
+Config fields:
+```yaml
+analysis:
+  use_agent: true       # default true; false = legacy pipeline
+  agent_timeout: 1800   # per-iteration subprocess timeout (seconds)
+```
+
+Agent logic lives in `analysis/agent_analysis.py`. Prompt template in `prompts/agent_analysis.yaml`.
+
 ### Pipeline UI (`core/pipeline_ui.py` + `core/dashboard_template.py`)
 
 The pipeline produces two forms of output:
@@ -104,6 +138,8 @@ ui:
 | `arxiv_interp_graph/context_pack/run.py` | Context pack orchestration + LLM fallback |
 | `arxiv_interp_graph/context_pack/download.py` | Article download (PDF + HTML) + manifest writing |
 | `prompts/question_manager.yaml` | All question prompts (generator, prioritizer, agent question generator) |
+| `analysis/agent_analysis.py` | CLI agent analysis: workspace setup, subprocess, output reading |
+| `prompts/agent_analysis.yaml` | Prompt template for analysis agent iterations |
 | `arxiv_interp_graph/enrich_arxiv_ids.py` | Batch-enrich graph with arxiv_id + open_access_url |
 | `.last_llm.json` | Persisted provider/model selection from last run |
 | `prompts/*.yaml` | Agent-specific prompt templates |
@@ -119,8 +155,12 @@ literature/           # Context pack outputs (when enabled)
 questions/            # Question generation + prioritization
   questions.txt       # Generated or context-pack questions
   prioritized_question.txt  # Selected question (from prioritizer)
-analysis_scripts/     # Generated Python analysis code
-analysis_results/     # Execution outputs
+analysis/             # Agent-mode analysis output (when use_agent=true)
+  background/         # Research question + confidence tracker
+  analysis_1/         # Per-iteration plans, scripts, evaluations
+  analysis_2/         # ...
+analysis_scripts/     # Legacy pipeline: generated Python analysis code
+analysis_results/     # Legacy pipeline: execution outputs
 visualizations/       # Generated plots
 reports/              # Final report
 dashboard.html        # Auto-refreshing HTML dashboard (written during run)

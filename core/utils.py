@@ -1019,11 +1019,27 @@ class PathResolver:
     def get_evaluation_dir(self) -> Path:
         """
         Get the directory path for evaluation results.
-        
+
         Returns:
             Path to the evaluation results directory
         """
         return self.get_path("evaluation_results")
+
+    def get_analysis_dir(self) -> Path:
+        """Get the agent analysis root directory: projects/{id}/analysis/"""
+        return self.get_path("analysis")
+
+    def ensure_analysis_dir(self) -> Path:
+        """Get (and create) the agent analysis root directory."""
+        return self.ensure_path("analysis")
+
+    def ensure_analysis_background_dir(self) -> Path:
+        """Get (and create) analysis/background/ directory."""
+        return self.ensure_path("analysis", "background")
+
+    def ensure_analysis_iteration_dir(self, n: int) -> Path:
+        """Get (and create) analysis/analysis_{n}/ directory."""
+        return self.ensure_path("analysis", f"analysis_{n}")
 
 # Configuration validation
 

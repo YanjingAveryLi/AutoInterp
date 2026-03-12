@@ -40,6 +40,8 @@ model:
 
 # Analysis settings
 analysis:
+  use_agent: true            # Use CLI agent (claude/codex) for analysis; false = legacy pipeline
+  agent_timeout: 1800        # Per-iteration timeout in seconds for agent subprocess
   execution:
     timeout: 180  # seconds
     max_memory: 4000  # MB
@@ -205,6 +207,10 @@ agents:
       temperature: 0.7
       max_tokens: 8000
       timeout: 180
+
+  # Analysis Agent (CLI subprocess — claude or codex)
+  analysis_agent:
+    timeout: 1800
 
   # Title Generation Agent
   title_generator:
