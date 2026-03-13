@@ -94,6 +94,7 @@ AGENT_DISPLAY_NAMES = {
     "autocritique_agent": "AutoCritique Agent",
     "revision_agent": "Revision Agent",
     "report_revision_agent": "Report Revision Agent",
+    "repo_agent": "Repo Agent",
 }
 
 
@@ -120,6 +121,7 @@ AGENT_STEP_MAP = {
     "autocritique_agent": "autocritique",
     "revision_agent": "revision",
     "report_revision_agent": "report_revision",
+    "repo_agent": "repo",
 }
 
 
@@ -142,6 +144,7 @@ PIPELINE_STEPS = [
     ("autocritique", "AutoCritique"),
     ("revision", "Revision"),
     ("report_revision", "Report Revision"),
+    ("repo", "Repo Assembly"),
 ]
 
 

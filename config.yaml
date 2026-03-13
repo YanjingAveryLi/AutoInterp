@@ -102,6 +102,12 @@ autocritique:
   report_revision_timeout: 900  # Timeout for report revision agent (incorporates revisions into report)
   max_revision_rounds: 2      # Max autocritique→revision→report revision cycles (0 = no revisions)
 
+# Repo assembly settings — assemble finalized files into a clean repo
+repo:
+  enabled: true               # Assemble finalized files into repo/ after pipeline completes
+  use_agent: true             # Use CLI agent (claude/codex) for repo assembly
+  agent_timeout: 900          # Subprocess timeout in seconds for repo agent
+
 # Computational resources
 resources:
   max_gpu_memory: 8000  # MB

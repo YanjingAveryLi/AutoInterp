@@ -28,6 +28,7 @@ Environment variables: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KE
 7. **AutoCritique** (optional) — CLI agent subprocess performs automated peer review, producing a verdict (Accept / Revise and Resubmit / Reject) and recommendation files
 8. **Revision** (conditional) — if AutoCritique verdict is "Revise and Resubmit", a CLI agent subprocess addresses each recommendation one at a time, performing new/revised analyses
 9. **Report Revision** (conditional) — after all per-recommendation revisions complete, a CLI agent subprocess reads the original report, review, responses, and revised analyses, then produces a revised report incorporating all changes
+10. **Repo Assembly** — CLI agent subprocess assembles finalized files (most current report, scripts, data, results, visualizations) into a clean `repo/` directory with a README
 
 ### Literature Search Question Generation
 
@@ -255,6 +256,37 @@ After all per-recommendation revision agents complete, a Report Revision Agent r
 
 Agent logic lives in `reporting/agent_report_revision.py`. Prompt template in `prompts/agent_report_revision.yaml`.
 
+### Repo Agent Mode (`repo/agent_repo.py`)
+
+After the pipeline completes (either after report generation, or after the autocritique/revision loop), a Repo Agent assembles the finalized project files into a clean, publishable `repo/` directory. The agent identifies the most current versions of all files (handling `_revision_x.y` suffixes), copies them into a standard structure, renames them with clean names, updates file references in scripts and the report, and writes a README.
+
+**Repo structure:**
+```
+repo/
+  README.md       # Project overview and codebase guide
+  paper/          # Final report (.md) and figures referenced in it
+  scripts/        # Most current analysis scripts (cleaned names)
+  data/           # Data files used by scripts
+  results/        # Analysis outputs and results
+  notebooks/      # Jupyter notebooks (if any)
+```
+
+**Skip rules:**
+- `repo.enabled: false` → step skipped
+- `repo.use_agent: false` → step skipped
+- Provider not `anthropic`/`openai` → step skipped
+- CLI binary not found → step skipped
+
+Config fields:
+```yaml
+repo:
+  enabled: true         # default true; false = skip repo assembly
+  use_agent: true       # must be true (no legacy fallback)
+  agent_timeout: 900    # subprocess timeout (seconds)
+```
+
+Agent logic lives in `repo/agent_repo.py`. Prompt template in `prompts/agent_repo.yaml`.
+
 ### Agent Subprocess Progress Polling (`core/agent_subprocess.py`)
 
 CLI agent subprocesses (question generation, analysis, report, autocritique) use `run_agent_with_polling()` instead of blocking `subprocess.run(capture_output=True)`. This provides real-time progress during long-running agent calls:
@@ -277,6 +309,7 @@ Milestone patterns per call site:
 - **AutoCritique agent** — watches `autocritique/round_{n}/` for `AutoCritique_log.md`, `AutoCritique_review.md`, `Recommendation_*.md`
 - **Revision agent** — watches `autocritique/round_{k}/` for `Reviewer_{i}_log.md`, `Response_{i}.md`
 - **Report revision agent** — watches `reports/` for `Report_revision_{k}.log`, `*_revision_{k}.md`
+- **Repo agent** — watches `repo/` for `README.md`, `paper/*.md`, `scripts/*.py`, `paper/*.png`/`*.svg`
 
 ### Pipeline UI (`core/pipeline_ui.py` + `core/dashboard_template.py`)
 
@@ -392,6 +425,8 @@ Key functions (all in `main.py`): `MODEL_MAPPINGS`, `MANUAL_CONFIG_AGENTS`, `_bu
 | `prompts/agent_revision.yaml` | Prompt template for revision agent |
 | `reporting/agent_report_revision.py` | CLI agent report revision: incorporates revisions into report |
 | `prompts/agent_report_revision.yaml` | Prompt template for report revision agent |
+| `repo/agent_repo.py` | CLI agent repo assembly: finalized files into clean repo structure |
+| `prompts/agent_repo.yaml` | Prompt template for repo agent |
 | `arxiv_interp_graph/enrich_arxiv_ids.py` | Batch-enrich graph with arxiv_id + open_access_url |
 | `.last_llm.json` | Persisted provider/model selection from last run |
 | `.user_options.json` | Persisted user option overrides (gitignored) |
@@ -431,6 +466,13 @@ autocritique/         # AutoCritique outputs (when enabled)
     Recommendation_*.md       # Actionable revision items (only on "Revise and Resubmit")
     Reviewer_*_log.md         # Revision agent working notes (one per recommendation)
     Response_*.md             # Revision agent formal responses (one per recommendation)
+repo/                 # Clean publishable repo (assembled by repo agent)
+  README.md             # Project overview and codebase guide
+  paper/                # Final report and figures
+  scripts/              # Most current analysis scripts
+  data/                 # Data files
+  results/              # Analysis outputs
+  notebooks/            # Jupyter notebooks (if any)
 dashboard.html        # Auto-refreshing HTML dashboard (written during run)
 ```
 

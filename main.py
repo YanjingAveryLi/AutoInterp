@@ -79,6 +79,12 @@ from AutoInterp.reporting.agent_report_revision import (
     run_report_revision_agent,
     read_report_revision_outputs,
 )
+from AutoInterp.repo.agent_repo import (
+    load_repo_prompt_template,
+    _build_repo_prompt,
+    run_repo_agent,
+    read_repo_outputs,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -3521,6 +3527,85 @@ async def streamlined_pipeline(framework: Dict[str, Any]) -> Dict[str, Any]:
                 pipeline_ui.step_skipped("revision", reason="autocritique disabled")
                 pipeline_ui.step_skipped("report_revision", reason="autocritique disabled")
 
+        # ------------------------------------------------------------------
+        # Repo Assembly — assemble finalized files into a clean repo
+        # ------------------------------------------------------------------
+        _repo_cfg = config.get("repo", {})
+        _repo_enabled = _repo_cfg.get("enabled", True)
+        _repo_use_agent = _repo_cfg.get("use_agent", True)
+        _repo_dir_path = None
+
+        # Determine the provider (reuse _ac_provider if available, else read from config)
+        _repo_provider = _ac_provider if _ac_enabled else (config.get("llm", {}).get("provider") or "").lower()
+
+        if _repo_enabled and _repo_use_agent:
+            import shutil as _shutil_repo
+            _repo_cli_name = "claude" if _repo_provider == "anthropic" else "codex"
+            _repo_agent_available = (
+                _repo_provider in ("anthropic", "openai")
+                and _shutil_repo.which(_repo_cli_name) is not None
+            )
+
+            if _repo_agent_available:
+                print("[AUTOINTERP] PHASE 8: Repo Assembly — assembling finalized files into clean repo")
+                logger.info("Starting repo assembly (provider=%s)", _repo_provider)
+                if pipeline_ui:
+                    pipeline_ui.step_start("repo")
+
+                try:
+                    _repo_template = load_repo_prompt_template()
+                    _repo_prompt_text = _build_repo_prompt(_repo_template)
+                    _repo_timeout = _repo_cfg.get("agent_timeout", 900)
+
+                    _repo_progress_cb = None
+                    if pipeline_ui:
+                        def _repo_progress_cb(msg):
+                            pipeline_ui.step_progress("repo", msg)
+
+                    _repo_result = run_repo_agent(
+                        provider=_repo_provider,
+                        project_dir=path_resolver.get_project_dir(),
+                        prompt_text=_repo_prompt_text,
+                        timeout=_repo_timeout,
+                        on_progress=_repo_progress_cb,
+                    )
+
+                    _repo_outputs = read_repo_outputs(path_resolver.get_project_dir())
+                    _repo_dir_path = _repo_outputs.get("repo_dir")
+                    _repo_readme = _repo_outputs.get("readme_path")
+
+                    if _repo_readme:
+                        _n_files = len(_repo_outputs.get("all_files", []))
+                        logger.info("Repo assembled at %s (%d files)", _repo_dir_path, _n_files)
+                        print(f"[AUTOINTERP] Repo assembled: {_repo_dir_path} ({_n_files} files)")
+                        if pipeline_ui:
+                            pipeline_ui.step_complete("repo", summary=f"{_n_files} files")
+                    else:
+                        logger.warning("Repo agent finished but no README.md found")
+                        print("[AUTOINTERP] Repo agent did not produce a README.md")
+                        if pipeline_ui:
+                            pipeline_ui.step_failed("repo", error="No README.md produced")
+
+                except Exception as _repo_exc:
+                    logger.error("Repo assembly failed: %s", _repo_exc)
+                    print(f"[AUTOINTERP] Repo assembly failed: {_repo_exc}")
+                    if pipeline_ui:
+                        pipeline_ui.step_failed("repo", error=str(_repo_exc))
+            else:
+                if _repo_provider in ("anthropic", "openai"):
+                    print(f"[AUTOINTERP] Repo assembly: '{_repo_cli_name}' CLI not found; skipping")
+                else:
+                    print(f"[AUTOINTERP] Repo assembly: provider '{_repo_provider}' not supported; skipping")
+                if pipeline_ui:
+                    pipeline_ui.step_skipped("repo", reason=f"CLI not available for {_repo_provider}")
+        elif _repo_enabled and not _repo_use_agent:
+            print("[AUTOINTERP] Repo assembly: agent mode disabled; skipping")
+            if pipeline_ui:
+                pipeline_ui.step_skipped("repo", reason="agent mode disabled")
+        else:
+            if pipeline_ui:
+                pipeline_ui.step_skipped("repo", reason="disabled")
+
         # Print task completion message
         result = {
             "status": "completed",
@@ -3531,6 +3616,7 @@ async def streamlined_pipeline(framework: Dict[str, Any]) -> Dict[str, Any]:
             "revised_report_path": _revised_report_path,
             "revision_rounds_completed": _ac_final_round,
             "revision_responses": [r.get("response_path") for r in _all_rev_responses if r.get("response_path")],
+            "repo_dir": _repo_dir_path,
             "conclusion": report_result.get("conclusion"),
             "final_confidence": report_result.get("final_confidence")
         }
