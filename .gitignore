@@ -3,6 +3,7 @@
 
 # Generated outputs
 projects/
+test_runs/
 
 # Python cache
 __pycache__/
@@ -33,6 +34,7 @@ logs/
 
 # Runtime state
 .user_options.json
+.user_manual_models.json
 .last_llm.json
 
 # Helper script to be deleted

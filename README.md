@@ -66,12 +66,13 @@ Optionally configure `config.yaml` with custom settings:
    - Model configuration
    - LLM provider and model
    - Analysis parameters
-   - Visualization settings
+   - Visualization settings (`visualization.use_agent`, `visualization.agent_timeout`)
    - Resource limits
-   - Context pack settings (`context_pack.use_agent`, `context_pack.agent_timeout`)
+   - Literature search settings (`literature_search.enabled`, `literature_search.n_papers`, `literature_search.use_agent`, `literature_search.agent_timeout`)
    - Reporting settings (`reporting.use_agent`, `reporting.agent_timeout`)
    - Pipeline UI settings (`ui.html_dashboard`, `ui.dashboard_refresh`, `ui.auto_open_browser`)
    - Interactive mode (`interactive_mode: true` to pause after each stage for user feedback)
+   - AutoCritique settings (`autocritique.enabled`, `autocritique.use_agent`, `autocritique.agent_timeout`)
 
 ## Usage
 
@@ -94,16 +95,16 @@ python -m AutoInterp --projects-dir /absolute/or/relative/path
 interp-agent --help
 ```
 
-### arxiv_interp_graph (Context Pack)
+### arxiv_interp_graph (Literature Search)
 
-AutoInterp ships with the `arxiv_interp_graph` module, which builds a citation graph of interpretability papers and can generate a lightweight context pack. The context pack selects three related papers, downloads their full text (PDF or HTML), and generates research questions — either via an external AI agent (Claude CLI or Codex CLI) or via an LLM API call.
+AutoInterp ships with the `arxiv_interp_graph` module, which builds a citation graph of interpretability papers and can generate a lightweight literature search. The literature search selects three related papers, downloads their full text (PDF or HTML), and generates research questions — either via an external AI agent (Claude CLI or Codex CLI) or via an LLM API call.
 
 ```bash
-# Run context pack from the repo root
-python main.py context-pack
+# Run literature search from the repo root
+python main.py literature-search
 ```
 
-**Question generation strategy:** When the context pack is enabled, the system picks a strategy based on the selected LLM provider:
+**Question generation strategy:** When the literature search is enabled, the system picks a strategy based on the selected LLM provider:
 
 | Provider | Strategy | CLI tool |
 |----------|----------|----------|
@@ -111,9 +112,9 @@ python main.py context-pack
 | OpenAI | Agent subprocess | `codex` |
 | OpenRouter / Manual | LLM API call | — |
 
-The agent reads the downloaded articles (PDFs and HTML files) directly and writes `Research_Questions.txt`. If the agent fails (CLI not installed, timeout, etc.), the system falls back to the LLM API call automatically. Set `context_pack.use_agent: false` in `config.yaml` to always use the LLM API fallback.
+The agent reads the downloaded articles (PDFs and HTML files) directly and writes `Research_Questions.txt`. If the agent fails (CLI not installed, timeout, etc.), the system falls back to the LLM API call automatically. Set `literature_search.use_agent: false` in `config.yaml` to always use the LLM API fallback.
 
-**Article download pipeline:** Each paper in the pre-built citation graph (1003 papers) stores an `arxiv_id` or `open_access_url` so downloads work without live API calls in most cases. Papers from Distill and the Transformer Circuits Thread are downloaded as HTML files; all others as PDFs. To re-enrich the graph after adding new papers, run `cd arxiv_interp_graph && python enrich_arxiv_ids.py`.
+**Article download pipeline:** Each paper in the pre-built citation graph (1003 papers) stores an `arxiv_id` (96.6%) or `open_access_url` (2.9%) so downloads work without live API calls in most cases. The 5 papers (0.5%) with no stored URL are automatically excluded from literature search sampling — they remain in the graph for topology/statistics but won't be selected. If a download fails at runtime (broken URL, timeout), the system automatically retries with a replacement paper from the graph (up to 3 attempts per slot). Papers from Distill and the Transformer Circuits Thread are downloaded as HTML files; all others as PDFs. To re-enrich the graph after adding new papers, run `cd arxiv_interp_graph && python enrich_arxiv_ids.py`.
 
 To use agent mode with Anthropic, install and authenticate the Claude CLI:
 ```bash
@@ -131,7 +132,7 @@ Key outputs:
 
 ### Options Menu
 
-After selecting a provider and model, the CLI prompts `Press [O] for Options, or Enter to continue:`. Pressing `O` opens an interactive menu to adjust common settings without editing `config.yaml`:
+The provider selection menu includes an `[5] Options` entry alongside the provider choices. Selecting it opens an interactive menu to adjust common settings without editing `config.yaml`. After closing the Options menu, you are returned to the provider selection screen:
 
 ```
 ==================================================
@@ -141,17 +142,46 @@ Options
 [2] Confidence threshold ............... 85%
 [3] Use CLI agent for analysis ......... true
 [4] Use CLI agent for report ........... true
-[5] Context pack (literature sampling) . true
-[6] Visualization format ............... png
-[7] Visualization DPI .................. 300
-[8] HTML dashboard ..................... true
-[9] Auto-open browser .................. true
-[10] Interactive mode (feedback loops) . false
+[5] Use CLI agent for visualization .... true
+[6] Literature search .................. true
+[7] Articles for question gen .......... 3
+[8] Visualization format ............... png
+[9] Visualization DPI .................. 300
+[10] HTML dashboard .................... true
+[11] Auto-open browser ................. true
+[12] Interactive mode (feedback loops) . false
+[13] AutoCritique (peer review) ........ true
 
 Enter number to edit, or press Enter to finish:
 ```
 
-After editing, you can apply changes for the current run only or save them as persistent defaults in `.user_options.json`. Saved defaults are loaded automatically on future runs and override `config.yaml` values. Press Enter at the prompt to skip the menu entirely.
+After editing, you can apply changes for the current run only or save them as persistent defaults in `.user_options.json`. Saved defaults are loaded automatically on future runs and override `config.yaml` values.
+
+### Manual Configuration (Per-Stage Models)
+
+The provider selection menu includes `[4] Manual Configuration` for fine-grained control over which model each pipeline stage uses. Selecting it opens a per-stage model picker:
+
+```
+============================================================
+Per-Stage Model Configuration
+============================================================
+[ 1] Question Generator ........... anthropic / claude-sonnet-4-6
+[ 2] Question Prioritizer ......... anthropic / claude-sonnet-4-6
+[ 3] Analysis Planner ............. anthropic / claude-sonnet-4-6
+[ 4] Analysis Generator ........... anthropic / claude-sonnet-4-6
+[ 5] Analysis Evaluator ........... anthropic / claude-sonnet-4-6
+[ 6] Visualization Planner ........ anthropic / claude-sonnet-4-6
+[ 7] Visualization Generator ...... anthropic / claude-sonnet-4-6
+[ 8] Visualization Evaluator ...... anthropic / claude-sonnet-4-6
+[ 9] Report Generator ............. anthropic / claude-sonnet-4-6
+[10] Title Generator .............. anthropic / claude-sonnet-4-6
+
+Enter number to edit, or press Enter to finish:
+```
+
+When you select a stage, you are shown a numbered list of all available models across all providers. You can mix and match providers freely (e.g. use Claude for analysis and GPT for reporting). After editing, changes can be applied for the current run only or saved as persistent defaults in `.user_manual_models.json`.
+
+To add a custom model to the picker, add it to the relevant agent's `llm` section in `config.yaml` — any (provider, model) pair found in the config but not in the built-in catalogue will appear automatically.
 
 ### Interactive Mode
 
@@ -161,6 +191,29 @@ Set `interactive_mode: true` in `config.yaml` (or toggle via the Options menu) t
 - **Type feedback** and press Enter to have the LLM revise the output. The revised version is displayed and you can provide additional feedback or press Enter to continue.
 
 Interactive mode adds checkpoints after: question generation, question prioritization, analysis plans (legacy mode), analysis evaluations (both modes), visualizations, and the final report. In agent mode analysis, user feedback between iterations is saved to `analysis/background/user_feedback.md` and automatically incorporated into the next iteration's prompt.
+
+### Prompt Testing Harness
+
+The full pipeline takes ~2 hours, making prompt iteration slow. `test_prompt.py` lets you replay individual agent stages (`questions`, `viz`, `report`) against a completed project run, so you can test prompt changes in minutes.
+
+```bash
+# Preview the assembled prompt without running (free)
+python test_prompt.py viz --project <completed_run> --dry-run
+
+# Run the visualization stage against a completed project
+python test_prompt.py viz --project <completed_run>
+
+# A/B test with a modified prompt file
+python test_prompt.py viz --project <completed_run> --prompt my_viz_v2.yaml --label "shorter-captions"
+
+# Override provider/model
+python test_prompt.py report --project <completed_run> --provider anthropic --model claude-opus-4-6
+
+# Question generation with a specific topic
+python test_prompt.py questions --project <completed_run> --task-description "How do attention heads specialize?"
+```
+
+The script creates lightweight test run directories under `test_runs/` using symlinks to the source project's input directories. Only the output directory is a real (empty) directory — no disk overhead. Provider/model defaults come from `.last_llm.json`. See `python test_prompt.py --help` for all options.
 
 ### Sandboxed Execution with Docker
 
@@ -195,7 +248,9 @@ Interactive mode adds checkpoints after: question generation, question prioritiz
 │   ├── prompts.yaml            # Main prompts configuration file
 │   ├── interactive.yaml        # Revision prompts for interactive mode feedback loops
 │   ├── agent_analysis.yaml     # Prompt template for analysis CLI agent
+│   ├── agent_autocritique.yaml  # Prompt template for autocritique CLI agent
 │   ├── agent_report.yaml       # Prompt template for report CLI agent
+│   ├── agent_visualization.yaml # Prompt template for visualization CLI agent
 │   ├── analysis_generator.yaml # Analysis Generator Prompts
 │   ├── analysis_planner.yaml   # Analysis Planning Prompts
 │   ├── evaluator.yaml          # Prompts for evaluating analysis results
@@ -214,18 +269,22 @@ Interactive mode adds checkpoints after: question generation, question prioritiz
 │   └── visualization_evaluator.py      # Evaluates generated visualizations
 │
 ├── visualization/
-│   ├── visualization_planner.py# Plans visualizations for analysis results
-│   └── visualization_generator.py      # Generates visualization code
+│   ├── agent_visualization.py  # CLI agent visualization: subprocess, output reading
+│   ├── visualization_planner.py# Plans visualizations for analysis results (legacy)
+│   └── visualization_generator.py      # Generates visualization code (legacy)
 │
 ├── reporting/
 │   ├── agent_report.py         # CLI agent report generation: subprocess, output reading
 │   └── report_generator.py     # Creates reproducible reports with visualizations (legacy)
 │
+├── autocritique/
+│   └── agent_autocritique.py   # CLI agent autocritique: subprocess, round management, output reading
+│
 ├── misc/
-│   ├── title.txt               # Project title information
-│   └── TransformerLens_Notes.txt# Technical notes and documentation
+│   └── title.txt               # Project title information
 │
 ├── main.py                     # Main workflow orchestrator
+├── test_prompt.py              # Prompt testing harness (replay stages against completed runs)
 ├── config.yaml                 # Configuration parameters (includes task configuration)
 └── PROMPTS_README.md           # Documentation for prompt system
 ```
@@ -252,9 +311,13 @@ Both modes write all output to the `analysis/` subdirectory within the project.
 
 ### Visualization
 
+By default, visualizations are generated by a CLI agent subprocess (Claude CLI or Codex CLI) that reads all analysis outputs, produces publication-quality figures, and writes captions. The agent writes `Visualization_log.md` (working notes), `figure_{n}.py` (scripts), `figure_{n}.png` (figures), and `caption_{n}.txt` (captions) to the `visualizations/` directory. When agent mode is unavailable, the system falls back to a legacy multi-call pipeline:
+
 - **Visualization Planner**: Plans appropriate visualizations for successful analysis results
 - **Visualization Generator**: Creates Python visualization code using matplotlib, seaborn, and other libraries
 - **Visualization Evaluator**: Uses multimodal LLMs to assess visualization quality and detect issues
+
+Set `visualization.use_agent: false` in `config.yaml` to always use the legacy pipeline.
 
 ### Reporting
 
@@ -264,11 +327,35 @@ By default, the final report is generated by a CLI agent subprocess (Claude CLI 
 
 Set `reporting.use_agent: false` in `config.yaml` to always use the legacy pipeline.
 
+### AutoCritique
+
+When `autocritique.enabled: true` (default) and `autocritique.use_agent: true`, an automated peer review step runs after report generation. A CLI agent subprocess reads the report, analyses, and visualizations, then produces a formal review with a verdict (**Reject**, **Revise and Resubmit**, or **Accept**).
+
+If the verdict is **Revise and Resubmit**, the agent also writes individual `Recommendation_N.md` files — one per issue — that are designed to be fed directly into the analysis agent prompts during a revision cycle.
+
+AutoCritique outputs are organized into round-based subdirectories (`autocritique/round_1/`, `autocritique/round_2/`, etc.) to support multiple review rounds:
+
+```
+autocritique/
+  round_1/
+    AutoCritique_log.md       # Working notes / scratchpad
+    AutoCritique_review.md    # Formal review with verdict
+    Recommendation_1.md       # (only on "Revise and Resubmit")
+    Recommendation_2.md
+    ...
+  round_2/                    # Created if round 1 triggers revisions
+    ...
+```
+
+There is no legacy fallback — if the agent can't run (CLI not found, unsupported provider), the step is skipped. Toggle via the Options menu (#13) or set `autocritique.enabled: false` in `config.yaml`.
+
 ### Pipeline UI & HTML Dashboard
 
 During each run, AutoInterp writes a self-contained `dashboard.html` file to the project directory. The dashboard provides:
 
-- **Per-step tabs** — Questions, Prioritize, Analysis, Visualization, Report — each showing all LLM prompts and responses for that stage
+- **Per-step tabs** — Questions, Prioritize, Analysis, Visualization, Report, AutoCritique — each showing all LLM prompts and responses for that stage
+- **Real-time progress** — All CLI agent subprocesses (question generation, analysis, visualization, report, autocritique) emit progress updates via filesystem polling every 3 seconds. Named milestone files (plans, scripts, figures, evaluations) get descriptive messages; any other new file the agent creates is also reported. Progress appears as `[~]` lines in the terminal and as a timestamped log in the dashboard
+- **Heartbeat** — When no new files are detected for 30 seconds, a "Still running... Xm Ys elapsed" message is emitted so the user always sees activity during long-running agents. An "Agent finished (Xm Ys)" message is emitted when the subprocess exits
 - **Auto-refresh** — the page polls for updates during the run and preserves your tab state, scroll position, and expanded/collapsed sections
 - **Analysis grouping** — iterative analysis calls are grouped by iteration and attempt, with a color gradient from gold to burnt umber
 - **Collapsible sections** — system prompts, user prompts, and assistant responses are each collapsible (all collapsed by default)

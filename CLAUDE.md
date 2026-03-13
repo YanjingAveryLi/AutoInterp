@@ -11,6 +11,10 @@ pip install -r requirements.txt
 python main.py          # interactive provider selection, then full pipeline
 python main.py run      # same as above
 python main.py literature-search  # run literature search only (no full pipeline)
+
+# Prompt testing (replay individual stages against completed runs)
+python test_prompt.py viz --project <completed_run> --dry-run   # preview prompt
+python test_prompt.py viz --project <completed_run>             # run stage
 ```
 
 Environment variables: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, `HF_TOKEN` (set whichever provider you use).
@@ -287,6 +291,56 @@ repo:
 
 Agent logic lives in `repo/agent_repo.py`. Prompt template in `prompts/agent_repo.yaml`.
 
+### Prompt Testing Harness (`test_prompt.py`)
+
+`test_prompt.py` replays individual agent stages against completed project runs so prompts can be iterated in minutes instead of the ~2-hour full pipeline. It creates lightweight test run directories using symlinks to the source project's input directories, with only the output directory as a real (empty) directory.
+
+**Supported stages:**
+
+| Stage | Agent module | Clears | Reads (symlinked) |
+|-------|-------------|--------|-------------------|
+| `questions` | `questions/agent_questions.py` | `questions/` | `literature/` (optional) |
+| `viz` | `visualization/agent_visualization.py` | `visualizations/` | `analysis/`, `questions/` |
+| `report` | `reporting/agent_report.py` | `reports/` | `analysis/`, `visualizations/`, `questions/` |
+
+**CLI arguments:**
+```
+positional:  stage              {questions, viz, report}
+required:    --project PATH     completed project dir (absolute or name under projects/)
+optional:    --prompt PATH      YAML or plain text prompt override
+             --label NAME       label for this run (default: timestamp)
+             --provider NAME    override provider (default: from .last_llm.json)
+             --model ID         override model
+             --timeout SECS     override timeout
+             --dry-run          print assembled prompt, don't run agent
+             --task-description TEXT  topic for questions stage
+```
+
+**Usage examples:**
+```bash
+# Preview the assembled prompt (free, no agent invocation)
+python test_prompt.py viz --project linear_representation_limits_diagnostic_2026-03-12T18-14-54 --dry-run
+
+# Run visualization with default prompt
+python test_prompt.py viz --project linear_representation_limits_diagnostic_2026-03-12T18-14-54
+
+# A/B test with a modified prompt
+python test_prompt.py viz --project <run> --prompt my_viz_v2.yaml --label "shorter-captions"
+
+# Override provider/model
+python test_prompt.py report --project <run> --provider anthropic --model claude-opus-4-6
+```
+
+**Test run directory layout** (example for `viz`):
+```
+test_runs/viz/shorter-captions/
+  analysis -> /abs/path/to/original/analysis     (symlink)
+  questions -> /abs/path/to/original/questions   (symlink)
+  visualizations/                                 (real empty dir, agent writes here)
+```
+
+The script reuses existing agent functions (`load_*_prompt_template()`, `_build_*_prompt()`, `run_*_agent()`, `read_*_outputs()`) — no new agent logic. Provider/model defaults come from `.last_llm.json`. Labels auto-deduplicate (`_2`, `_3` suffixes). `test_runs/` is gitignored.
+
 ### Agent Subprocess Progress Polling (`core/agent_subprocess.py`)
 
 CLI agent subprocesses (question generation, analysis, report, autocritique) use `run_agent_with_polling()` instead of blocking `subprocess.run(capture_output=True)`. This provides real-time progress during long-running agent calls:
@@ -398,6 +452,7 @@ Key functions (all in `main.py`): `MODEL_MAPPINGS`, `MANUAL_CONFIG_AGENTS`, `_bu
 
 | File | Purpose |
 |------|---------|
+| `test_prompt.py` | Prompt testing harness — replay individual agent stages against completed runs |
 | `main.py` | Main orchestrator, CLI entry point, `streamlined_pipeline()` |
 | `config.yaml` | All configuration (providers, agents, execution, literature search, UI) |
 | `core/llm_interface.py` | LLM API abstraction (Anthropic, OpenAI, OpenRouter) |
