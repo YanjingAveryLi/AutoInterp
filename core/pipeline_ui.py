@@ -63,6 +63,14 @@ class LLMInteraction:
 
 
 @dataclass
+class OutputFile:
+    """An output file produced by an agent subprocess step."""
+    filename: str
+    content: str
+    timestamp: datetime
+
+
+@dataclass
 class PipelineStep:
     """A single pipeline step (e.g. question_generation, iterative_analysis)."""
     step_id: str
@@ -73,6 +81,7 @@ class PipelineStep:
     summary: Optional[str] = None
     llm_interactions: List[LLMInteraction] = field(default_factory=list)
     progress_messages: List[ProgressMessage] = field(default_factory=list)
+    output_files: List[OutputFile] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -363,6 +372,20 @@ class PipelineUI:
         if self.dashboard_enabled:
             self._write_dashboard()
 
+    def step_output(self, step_id: str, filename: str, content: str) -> None:
+        """Record an output file produced by an agent subprocess step."""
+        step = self.steps.get(step_id)
+        if not step:
+            return
+        step.output_files.append(OutputFile(
+            filename=filename,
+            content=content,
+            timestamp=datetime.now(),
+        ))
+
+        if self.dashboard_enabled:
+            self._write_dashboard()
+
     # ------------------------------------------------------------------
     # LLM call tracking
     # ------------------------------------------------------------------
@@ -536,6 +559,14 @@ class PipelineUI:
                         "iteration_number": i.iteration_number,
                     }
                     for i in step.llm_interactions
+                ],
+                "output_files": [
+                    {
+                        "filename": of.filename,
+                        "content": of.content,
+                        "timestamp": of.timestamp,
+                    }
+                    for of in step.output_files
                 ],
             })
         return result

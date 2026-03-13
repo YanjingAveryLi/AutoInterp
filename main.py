@@ -3322,6 +3322,28 @@ async def streamlined_pipeline(framework: Dict[str, Any]) -> Dict[str, Any]:
                         if _ac_review_path:
                             logger.info("AutoCritique round %d review at %s", _ac_round, _ac_review_path)
                             print(f"[AUTOINTERP] AutoCritique round {_ac_round} review at {_ac_review_path}")
+
+                            # Display review and recommendations on the dashboard
+                            if pipeline_ui:
+                                try:
+                                    _review_content = Path(_ac_review_path).read_text(encoding="utf-8", errors="replace")
+                                    pipeline_ui.step_output(
+                                        "autocritique",
+                                        f"AutoCritique_review.md (round {_ac_round})",
+                                        _review_content,
+                                    )
+                                except Exception:
+                                    pass
+                                for _rec_fpath in _ac_outputs.get("recommendations", []):
+                                    try:
+                                        _rec_content = Path(_rec_fpath).read_text(encoding="utf-8", errors="replace")
+                                        pipeline_ui.step_output(
+                                            "autocritique",
+                                            f"{Path(_rec_fpath).name} (round {_ac_round})",
+                                            _rec_content,
+                                        )
+                                    except Exception:
+                                        pass
                         else:
                             logger.warning("AutoCritique agent (round %d) finished but no review file found", _ac_round)
                             print(f"[AUTOINTERP] AutoCritique agent (round {_ac_round}) did not produce a review")
@@ -3407,6 +3429,13 @@ async def streamlined_pipeline(framework: Dict[str, Any]) -> Dict[str, Any]:
 
                             if _rev_out.get("response_path"):
                                 print(f"[AUTOINTERP]   Response written: {_rev_out['response_path']}")
+                                # Display response on the dashboard
+                                if pipeline_ui and _rev_out.get("response_text"):
+                                    pipeline_ui.step_output(
+                                        "revision",
+                                        f"Response_{_rec_idx}.md (round {_ac_round})",
+                                        _rev_out["response_text"],
+                                    )
                             else:
                                 print(f"[AUTOINTERP]   Revision agent (rec {_rec_idx}) did not produce a Response file")
 

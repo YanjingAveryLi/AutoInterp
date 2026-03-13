@@ -272,6 +272,32 @@ def render_analysis_columns(interactions: List[Dict[str, Any]]) -> str:
 # Progress log renderer
 # ---------------------------------------------------------------------------
 
+def render_output_card(output_file: Dict[str, Any]) -> str:
+    """Render a single output file as a collapsible card."""
+    filename = escape_html(output_file.get("filename", ""))
+    content = escape_html(output_file.get("content", ""))
+    chars = _format_chars(output_file.get("content"))
+
+    return f'''
+    <div class="card">
+        <div class="card-head">
+            <span class="name">{filename}</span>
+            <span>{chars} chars</span>
+        </div>
+        <details class="card-section" open>
+            <summary>CONTENT</summary>
+            <pre class="card-pre asst">{content}</pre>
+        </details>
+    </div>'''
+
+
+def render_output_cards(output_files: List[Dict[str, Any]]) -> str:
+    """Render all output file cards for a step."""
+    if not output_files:
+        return ""
+    return "\n".join(render_output_card(of) for of in output_files)
+
+
 def render_progress_log(
     progress_messages: List[Dict[str, Any]],
     step_start_time: Optional[datetime] = None,
@@ -371,6 +397,7 @@ def render_tab_content(steps: List[Dict[str, Any]], task_name: str = "") -> str:
     for step in steps:
         interactions = step.get("llm_interactions", [])
         progress_msgs = step.get("progress_messages", [])
+        output_files = step.get("output_files", [])
         step_id = step["step_id"]
         cfg = STEP_CONFIG.get(step_id, {"label": step_id, "tab_id": step_id})
         tab_id = cfg["tab_id"]
@@ -378,10 +405,16 @@ def render_tab_content(steps: List[Dict[str, Any]], task_name: str = "") -> str:
         # Render progress log (shown above main content when present)
         progress_html = render_progress_log(progress_msgs, step.get("start_time"))
 
+        # Render output file cards (shown after progress, before LLM cards)
+        output_html = render_output_cards(output_files)
+
         if step_id == "iterative_analysis":
             content = render_analysis_columns(interactions)
         elif interactions:
             content = "\n".join(render_llm_card(i) for i in interactions)
+        elif output_files:
+            # Step with output files but no LLM interactions (agent subprocess steps)
+            content = ""
         else:
             status = step["status"]
             if status == "pending":
@@ -394,8 +427,8 @@ def render_tab_content(steps: List[Dict[str, Any]], task_name: str = "") -> str:
             else:
                 content = '<p class="no-data">No LLM interactions recorded for this step.</p>'
 
-        # Prepend progress log
-        content = progress_html + content
+        # Prepend progress log + output files
+        content = progress_html + output_html + content
 
         parts.append(f'''
     <div class="tab-content" id="tab-{escape_html(tab_id)}">
