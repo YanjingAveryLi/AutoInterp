@@ -104,6 +104,7 @@ AGENT_DISPLAY_NAMES = {
     "revision_agent": "Revision Agent",
     "report_revision_agent": "Report Revision Agent",
     "repo_agent": "Repo Agent",
+    "questions_agent": "Questions Agent (Generate + Prioritize)",
 }
 
 
@@ -131,6 +132,7 @@ AGENT_STEP_MAP = {
     "revision_agent": "revision",
     "report_revision_agent": "report_revision",
     "repo_agent": "repo",
+    "questions_agent": "question_generation",
 }
 
 
@@ -240,17 +242,29 @@ class PipelineUI:
                 dt = (datetime.now() - self.pipeline_start_time).total_seconds()
                 elapsed = f"  ({self._fmt_duration(dt)})"
 
+            # Find the report in repo/paper/
+            report_line = ""
+            repo_dir = result.get("repo_dir")
+            if repo_dir:
+                paper_dir = Path(repo_dir) / "paper"
+                if paper_dir.exists():
+                    md_files = sorted(paper_dir.glob("*.md"))
+                    if md_files:
+                        report_line = f"\n[dim]Report: {md_files[0]}[/dim]"
+            if not report_line:
+                # Fallback to report_path from result
+                rp = result.get("report_path")
+                if rp:
+                    report_line = f"\n[dim]Report: {rp}[/dim]"
+
             self.console.print()
             self.console.print(
                 Panel(
-                    f"[bold green]Pipeline Complete[/bold green]{elapsed}\n"
-                    f"[dim]Conclusion: {result.get('conclusion', 'N/A')}  |  "
-                    f"Confidence: {result.get('final_confidence', 0):.2f}[/dim]",
+                    f"[bold green]Pipeline Complete[/bold green]{elapsed}{report_line}",
                     border_style="green",
                     padding=(1, 2),
                 )
             )
-            self._print_step_table()
 
         if self.dashboard_enabled:
             self._write_dashboard(final=True)

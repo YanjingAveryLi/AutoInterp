@@ -52,12 +52,12 @@ AutoInterp is an automated AI interpretability research framework that uses mult
    - Analysis plan from 3a
    - Model configuration
    - Error context (if retry)
-2. **Process:** Generates Python code using transformer-lens
+2. **Process:** Generates Python analysis code
 3. **Output:** Executable analysis script
 4. **Prompt Structure:**
    - System: Expert Python programmer, code-only output
    - User: Specification with question, model, plan + requirements
-   - Focus: transformer-lens, print to stdout, no visualizations
+   - Focus: print to stdout, no visualizations
 
 #### **3c: Code Execution**
 **Component:** `AnalysisExecutor`

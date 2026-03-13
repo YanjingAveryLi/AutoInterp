@@ -476,8 +476,6 @@ def install_requirements(env_path: Union[str, Path], requirements_file: Union[st
         "matplotlib",
         "torch",
         "transformers",
-        "transformer-lens",  # Use hyphen not underscore
-        "transformer_lens",  # Also try with underscore for compatibility
         "einops",
         "tqdm",
         "spacy",
@@ -568,7 +566,7 @@ def install_requirements(env_path: Union[str, Path], requirements_file: Union[st
     # Verify requirements file installation
     print(f"[AUTOINTERP] Verifying package installation...")
     # Check for a few critical packages we know we need
-    critical_packages = ["nltk", "transformer_lens", "transformers"]
+    critical_packages = ["nltk", "transformers"]
     failed = []
     
     for package in critical_packages:
@@ -701,8 +699,7 @@ def handle_module_error(env_path: Optional[Union[str, Path]], error_msg: str) ->
                 # Comprehensive mapping of module names to pip install names (matching analysis_executor.py)
                 pip_module_map = {
                     # Machine Learning & AI
-                    "transformer_lens": "transformer-lens",
-                    "sklearn": "scikit-learn", 
+                    "sklearn": "scikit-learn",
                     "scikit_learn": "scikit-learn",
                     "cv2": "opencv-python",
                     "PIL": "Pillow",
@@ -771,7 +768,6 @@ def handle_module_error(env_path: Optional[Union[str, Path]], error_msg: str) ->
     # Comprehensive mapping of module names to pip install names (matching analysis_executor.py)
     pip_module_map = {
         # Machine Learning & AI
-        "transformer_lens": "transformer-lens",
         "sklearn": "scikit-learn",
         "scikit_learn": "scikit-learn",
         "cv2": "opencv-python",
@@ -821,19 +817,9 @@ def handle_module_error(env_path: Optional[Union[str, Path]], error_msg: str) ->
             print(f"[AUTOINTERP] Failed to install module {pip_module}: {err_msg}")
             
             # Try common fallbacks for specific packages
-            if missing_module in ["transformer_lens", "circuitsvis", "jaxtyping"]:
+            if missing_module in ["circuitsvis", "jaxtyping"]:
                 # These packages may need specific versions or install methods
-                
-                # For transformer_lens, first ensure torch is installed
-                if missing_module == "transformer_lens":
-                    print(f"[AUTOINTERP] Attempting to first install torch dependency")
-                    install_package(env_path, "torch")
-                    install_package(env_path, "einops")
-                    install_package(env_path, "transformers")
-                    success, err_msg = install_package(env_path, "transformer-lens")
-                    if success:
-                        print(f"[AUTOINTERP] Successfully installed transformer-lens after dependencies")
-                        installed_any = True
+                pass
     
     if installed_any:
         return True, f"Installed missing modules: {', '.join(missing_modules)}"
@@ -1214,25 +1200,6 @@ def load_prompts(base_path: Union[str, Path], main_file: str = "prompts.yaml") -
                         # For non-dict contents, just replace/add the value
                         prompts_config[section] = contents
                         logger.debug(f"Replaced section '{section}' with non-dict content")
-    
-    # Load TransformerLens_Notes.txt and append to analysis_generator system_message
-    transformerlens_notes_path = base_path.parent / "misc" / "TransformerLens_Notes.txt"
-    if transformerlens_notes_path.exists():
-        try:
-            with open(transformerlens_notes_path, 'r') as f:
-                notes_content = f.read()
-            
-            # Append the notes to the analysis_generator system_message
-            if 'analysis_generator' in prompts_config and 'system_message' in prompts_config['analysis_generator']:
-                current_system_message = prompts_config['analysis_generator']['system_message']
-                prompts_config['analysis_generator']['system_message'] = current_system_message + "\n\n" + notes_content
-                logger.debug("Successfully appended TransformerLens_Notes.txt to analysis_generator system_message")
-            else:
-                logger.warning("analysis_generator system_message not found, could not append TransformerLens_Notes.txt")
-        except Exception as e:
-            logger.warning(f"Could not load TransformerLens_Notes.txt: {e}")
-    else:
-        logger.debug(f"TransformerLens_Notes.txt not found at {transformerlens_notes_path}")
     
     logger.debug(f"Final config structure: {list(prompts_config.keys())}")
     

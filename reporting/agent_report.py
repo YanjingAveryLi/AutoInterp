@@ -1,6 +1,6 @@
 """
-Run an external AI agent (claude CLI or codex CLI) to incorporate all revision
-work into the research report after per-recommendation revision agents finish.
+Run an external AI agent (claude CLI or codex CLI) to generate the final
+research report autonomously within one subprocess invocation.
 """
 
 import logging
@@ -15,16 +15,16 @@ from AutoInterp.core.agent_subprocess import (
     MilestoneSpec,
     run_agent_with_polling,
 )
-from AutoInterp.core.utils import PACKAGE_ROOT
+from AutoInterp.core.utils import PathResolver, PACKAGE_ROOT
 
 logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# Agent command construction
+# Agent command construction (mirrors agent_analysis.py / agent_questions.py)
 # ---------------------------------------------------------------------------
 
-def _get_report_revision_agent_command(
+def _get_report_agent_command(
     provider: str,
     prompt_text: str,
     project_dir: Path,
@@ -63,39 +63,35 @@ def _get_report_revision_agent_command(
 # Prompt building
 # ---------------------------------------------------------------------------
 
-def _build_report_revision_prompt(
-    prompt_template: str,
-    round_number: int,
-) -> str:
+def _build_report_prompt(prompt_template: str) -> str:
     """
     Substitute placeholders in the prompt template.
 
-    Replaces ``{k}`` with the round number.  ``{n}`` is left literal so the
-    agent sees it as-is (it refers to analysis iteration numbers the agent
-    discovers at runtime).
+    Currently the report prompt has no dynamic placeholders — the agent
+    discovers everything it needs by reading the filesystem.  This function
+    exists for forward-compatibility with future placeholders.
     """
-    return prompt_template.replace("{k}", str(round_number))
+    return prompt_template
 
 
 # ---------------------------------------------------------------------------
 # Agent subprocess execution
 # ---------------------------------------------------------------------------
 
-def run_report_revision_agent(
+def run_report_agent(
     provider: str,
     project_dir: Path,
     prompt_text: str,
     timeout: int = 900,
-    round_number: int = 1,
     on_progress: Optional[Callable[[str], None]] = None,
     model: str = "",
 ) -> Dict[str, Any]:
     """
-    Launch the CLI agent subprocess for report revision and return the result.
+    Launch the CLI agent subprocess for report generation and return the result.
 
     Returns ``{"success": bool, "stdout": str, "stderr": str, "returncode": int}``.
     """
-    result = _get_report_revision_agent_command(provider, prompt_text, project_dir, model=model)
+    result = _get_report_agent_command(provider, prompt_text, project_dir, model=model)
     if result is None:
         cli_name = "claude" if (provider or "").lower() == "anthropic" else "codex"
         logger.warning(
@@ -110,25 +106,19 @@ def run_report_revision_agent(
     reports_dir = cwd / "reports"
     reports_dir.mkdir(parents=True, exist_ok=True)
 
-    logger.debug(
-        "Running report revision agent round %d: %s (timeout=%ds)",
-        round_number, cmd[0], timeout,
-    )
-    print(
-        f"[AUTOINTERP] Running {cmd[0]} report revision agent "
-        f"(round {round_number}, timeout={timeout}s)..."
-    )
+    logger.debug("Running report agent: %s (timeout=%ds)", cmd[0], timeout)
+    print(f"[AUTOINTERP] Running {cmd[0]} report agent (timeout={timeout}s)...")
 
     milestone = MilestoneSpec(
         watch_dir=reports_dir,
         patterns=[
             MilestonePattern(
-                glob=f"Report_revision_{round_number}.log",
-                message_fn=lambda _p, _k=round_number: f"Wrote Report_revision_{_k}.log",
+                glob="Reporter_log.md",
+                message_fn=lambda _: "Wrote Reporter_log.md",
             ),
             MilestonePattern(
-                glob=f"*_revision_{round_number}.md",
-                message_fn=lambda p: f"Wrote revised report: {Path(p).name}",
+                glob="*.md",
+                message_fn=lambda fname: f"Wrote report file: {fname}",
             ),
         ],
     )
@@ -144,15 +134,11 @@ def run_report_revision_agent(
     success = proc_result["success"]
     if not success:
         logger.warning(
-            "Report revision agent (round %d) exited with code %d. stderr: %s",
-            round_number,
+            "Report agent exited with code %d. stderr: %s",
             proc_result["returncode"],
             proc_result["stderr"][:500],
         )
-        print(
-            f"[AUTOINTERP] Report revision agent (round {round_number}) "
-            f"exited with code {proc_result['returncode']}"
-        )
+        print(f"[AUTOINTERP] Report agent exited with code {proc_result['returncode']}")
 
     return proc_result
 
@@ -161,41 +147,37 @@ def run_report_revision_agent(
 # Reading agent outputs
 # ---------------------------------------------------------------------------
 
-def read_report_revision_outputs(
-    project_dir: Path,
-    round_number: int = 1,
-) -> Dict[str, Any]:
+def read_report_outputs(project_dir: Path) -> Dict[str, Any]:
     """
-    Read the files produced by the report revision agent.
+    Read the files produced by the report agent.
 
-    Returns a dict with keys: ``revised_report_path``, ``log_path``,
-    ``log_text``.
+    Returns a dict with keys: ``report_path``, ``reporter_log``, ``all_files``.
     """
     reports_dir = project_dir / "reports"
     outputs: Dict[str, Any] = {
-        "revised_report_path": None,
-        "log_path": None,
-        "log_text": "",
+        "report_path": None,
+        "reporter_log": "",
+        "all_files": [],
     }
 
     if not reports_dir.exists():
         return outputs
 
-    log_file = reports_dir / f"Report_revision_{round_number}.log"
-    if log_file.is_file():
-        outputs["log_path"] = str(log_file)
-        outputs["log_text"] = log_file.read_text(encoding="utf-8", errors="replace")
+    md_files: List[Path] = []
+    for fpath in sorted(reports_dir.iterdir()):
+        if not fpath.is_file():
+            continue
+        outputs["all_files"].append(str(fpath))
+        if fpath.name == "Reporter_log.md":
+            outputs["reporter_log"] = fpath.read_text(encoding="utf-8", errors="replace")
+        elif fpath.suffix == ".md" and fpath.name != "Reporter_log.md":
+            md_files.append(fpath)
 
-    # Find the revised report: *_revision_{k}.md
-    revision_suffix = f"_revision_{round_number}.md"
-    candidates = [
-        f for f in sorted(reports_dir.iterdir())
-        if f.is_file() and f.name.endswith(revision_suffix)
-    ]
-    if candidates:
-        # Prefer the newest by mtime if multiple matches
-        candidates.sort(key=lambda p: p.stat().st_mtime)
-        outputs["revised_report_path"] = str(candidates[-1])
+    # The report is the .md file that is not the log (prefer the newest one)
+    if md_files:
+        # Sort by modification time, newest last
+        md_files.sort(key=lambda p: p.stat().st_mtime)
+        outputs["report_path"] = str(md_files[-1])
 
     return outputs
 
@@ -204,11 +186,11 @@ def read_report_revision_outputs(
 # Prompt template loading helper
 # ---------------------------------------------------------------------------
 
-def load_report_revision_prompt_template() -> str:
-    """Load the agent report revision prompt template from prompts/agent_report_revision.yaml."""
-    prompt_path = PACKAGE_ROOT / "prompts" / "agent_report_revision.yaml"
+def load_report_prompt_template() -> str:
+    """Load the agent report prompt template from prompts/agent_report.yaml."""
+    prompt_path = PACKAGE_ROOT / "prompts" / "agent_report.yaml"
     if not prompt_path.exists():
-        raise FileNotFoundError(f"Report revision prompt template not found: {prompt_path}")
+        raise FileNotFoundError(f"Report prompt template not found: {prompt_path}")
     with open(prompt_path, "r", encoding="utf-8") as f:
         data = yaml.safe_load(f)
     return data.get("prompt_template", "")

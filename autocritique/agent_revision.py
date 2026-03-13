@@ -28,6 +28,7 @@ def _get_revision_agent_command(
     provider: str,
     prompt_text: str,
     project_dir: Path,
+    model: str = "",
 ) -> Optional[Tuple[List[str], Dict[str, Any]]]:
     """
     Return ``(cmd_list, subprocess_kwargs)`` for the selected provider's CLI
@@ -39,14 +40,20 @@ def _get_revision_agent_command(
         cli = "claude"
         if not shutil.which(cli):
             return None
-        cmd = [cli, "-p", "--dangerously-skip-permissions", prompt_text]
+        cmd = [cli, "-p", "--dangerously-skip-permissions"]
+        if model:
+            cmd += ["--model", model]
+        cmd.append(prompt_text)
         return cmd, {"cwd": str(project_dir)}
 
     if provider_lower == "openai":
         cli = "codex"
         if not shutil.which(cli):
             return None
-        cmd = [cli, "exec", "-s", "workspace-write", prompt_text]
+        cmd = [cli, "exec", "-s", "workspace-write"]
+        if model:
+            cmd += ["-m", model]
+        cmd.append(prompt_text)
         return cmd, {"cwd": str(project_dir)}
 
     return None
@@ -87,13 +94,14 @@ def run_revision_agent(
     round_number: int = 1,
     recommendation_idx: int = 1,
     on_progress: Optional[Callable[[str], None]] = None,
+    model: str = "",
 ) -> Dict[str, Any]:
     """
     Launch the CLI agent subprocess to address one recommendation.
 
     Returns ``{"success": bool, "stdout": str, "stderr": str, "returncode": int}``.
     """
-    result = _get_revision_agent_command(provider, prompt_text, project_dir)
+    result = _get_revision_agent_command(provider, prompt_text, project_dir, model=model)
     if result is None:
         cli_name = "claude" if (provider or "").lower() == "anthropic" else "codex"
         logger.warning(

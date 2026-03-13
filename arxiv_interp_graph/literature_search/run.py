@@ -1,15 +1,19 @@
 """
-Run full context pack pipeline: load graph -> seed + forward/backward -> 3 papers -> download PDFs + manifest -> optional LLM (one research question).
+Run full literature search pipeline: load graph -> seed + forward/backward -> 3 papers -> download PDFs + manifest -> optional LLM (one research question).
 """
 
 import json
+import logging
+import random
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 import networkx as nx
 
-from .download import download_context_pack_pdfs, write_manifest
-from .sampling import build_context_pack
+from .download import download_literature_search_pdfs, write_manifest
+from .sampling import _has_download_url, _node_to_paper, build_literature_search
+
+logger = logging.getLogger(__name__)
 
 
 def _load_graph(graph_path: str | Path) -> nx.DiGraph:
@@ -42,7 +46,7 @@ def _load_graph(graph_path: str | Path) -> nx.DiGraph:
     return G
 
 # When sending whole PDFs via OpenRouter, use the instruction-only prompt (no paper_content).
-CONTEXT_PACK_QUESTION_PROMPT_WITH_PDFS = """You are an expert in LLM interpretability research. I want you to generate a new research question in the field of AI interpretability. It should be a question that can be empirically investigated by analyzing the activations and outputs of a small open source LLM. I have attached three papers as PDFs. Use them for inspiration. Your question should be theoretically important and advance the literature in a meaningful way.
+LITERATURE_SEARCH_QUESTION_PROMPT_WITH_PDFS = """You are an expert in LLM interpretability research. I want you to generate a new research question in the field of AI interpretability. It should be a question that can be empirically investigated by analyzing the activations and outputs of a small open source LLM. I have attached three papers as PDFs. Use them for inspiration. Your question should be theoretically important and advance the literature in a meaningful way.
 
 Requirements:
 1. Ground the question in these papers' themes (use them for inspiration).
@@ -55,7 +59,7 @@ RATIONALE: <one short paragraph>
 """
 
 # Fallback when not sending PDFs: use extracted text or abstracts.
-CONTEXT_PACK_QUESTION_PROMPT_WITH_TEXT = """You are an expert in LLM interpretability research. I want you to generate a new research question in the field of AI interpretability. It should be a question that can be empirically investigated by analyzing the activations and outputs of a small open source LLM. Use the three papers below for inspiration. Your question should be theoretically important and advance the literature in a meaningful way.
+LITERATURE_SEARCH_QUESTION_PROMPT_WITH_TEXT = """You are an expert in LLM interpretability research. I want you to generate a new research question in the field of AI interpretability. It should be a question that can be empirically investigated by analyzing the activations and outputs of a small open source LLM. Use the three papers below for inspiration. Your question should be theoretically important and advance the literature in a meaningful way.
 
 Requirements:
 1. Ground the question in these papers' themes (use them for inspiration).
@@ -150,7 +154,7 @@ def _generate_question_llm(
             pdf_paths.append(path)
     # Prefer sending whole PDFs to OpenRouter (Sonnet 4.6) when we have all 3
     if len(pdf_paths) == 3:
-        prompt = CONTEXT_PACK_QUESTION_PROMPT_WITH_PDFS
+        prompt = LITERATURE_SEARCH_QUESTION_PROMPT_WITH_PDFS
         try:
             out = generate_fn(system, prompt, pdf_paths=pdf_paths)
             return (out or "").strip()
@@ -159,17 +163,67 @@ def _generate_question_llm(
             pass
     # Fallback: send extracted text or abstracts
     content = "\n".join(_paper_content_for_llm(p) for p in papers)
-    prompt = CONTEXT_PACK_QUESTION_PROMPT_WITH_TEXT.format(paper_content=content)
+    prompt = LITERATURE_SEARCH_QUESTION_PROMPT_WITH_TEXT.format(paper_content=content)
     try:
         out = generate_fn(system, prompt)
         return (out or "").strip()
     except Exception as e:
         import sys
-        print(f"[context_pack] LLM call failed: {e}", file=sys.stderr)
+        print(f"[literature_search] LLM call failed: {e}", file=sys.stderr)
         return ""
 
 
-def run_context_pack(
+def _retry_failed_downloads(
+    papers: List[Dict[str, Any]],
+    G: nx.DiGraph,
+    output_dir: Path,
+    s2_client: Optional[Any],
+    max_retries: int = 3,
+) -> List[Dict[str, Any]]:
+    """
+    Replace papers whose download failed with other downloadable papers
+    from the graph. Tries up to *max_retries* replacements per slot.
+    """
+    rng = random.Random()
+    tried_ids = {p["paperId"] for p in papers}
+
+    for idx, p in enumerate(papers):
+        if p.get("download_path") is not None:
+            continue  # downloaded OK
+
+        title = (p.get("title") or p.get("paperId", "?"))[:60]
+        logger.info("Download failed for '%s'; attempting replacement...", title)
+
+        # Gather candidates: downloadable nodes not already in the pack
+        candidates = [
+            nid for nid in G.nodes()
+            if _has_download_url(G, nid) and nid not in tried_ids
+        ]
+        rng.shuffle(candidates)
+
+        replaced = False
+        for attempt, nid in enumerate(candidates[:max_retries]):
+            tried_ids.add(nid)
+            replacement = _node_to_paper(G, nid, p.get("relation", "replacement"), "graph")
+            downloaded = download_literature_search_pdfs([replacement], output_dir, s2_client)
+            replacement = downloaded[0]
+            if replacement.get("download_path") is not None:
+                logger.info(
+                    "Replaced '%s' with '%s' (attempt %d)",
+                    title, (replacement.get("title") or "")[:60], attempt + 1,
+                )
+                papers[idx] = replacement
+                replaced = True
+                break
+            logger.debug("Replacement attempt %d also failed, trying next...", attempt + 1)
+
+        if not replaced:
+            logger.warning("Could not find a downloadable replacement for '%s'", title)
+
+    return papers
+
+
+def run_literature_search(
     graph_path: str | Path,
     output_dir: str | Path,
     seed_id: Optional[str] = None,
@@ -180,9 +234,10 @@ def run_context_pack(
     seed: Optional[int] = None,
     download_pdfs: bool = True,
     llm_generate_fn: Optional[Callable[[str, str], str]] = None,
+    n_papers: int = 3,
 ) -> Dict[str, Any]:
     """
-    Load graph, build 3-paper context pack (seed + forward + backward), download PDFs, write manifest.
+    Load graph, build literature search (seed + forward + backward), download PDFs, write manifest.
     If llm_generate_fn is provided, generate 1 research question and save to output_dir.
 
     Returns dict with keys: papers, manifest_path, question_path (if LLM ran), question_text.
@@ -191,7 +246,7 @@ def run_context_pack(
     output_dir.mkdir(parents=True, exist_ok=True)
 
     G = _load_graph(graph_path)
-    papers = build_context_pack(
+    papers = build_literature_search(
         G,
         seed_id=seed_id,
         s2_client=s2_client,
@@ -199,12 +254,18 @@ def run_context_pack(
         n_backward=n_backward,
         min_forward_from_graph=min_forward_from_graph,
         seed=seed,
+        n_papers=n_papers,
     )
-    if len(papers) < 3:
+    if len(papers) < n_papers:
         return {"papers": papers, "manifest_path": None, "question_path": None, "question_text": None}
 
     if download_pdfs:
-        papers = download_context_pack_pdfs(papers, output_dir, s2_client)
+        papers = download_literature_search_pdfs(papers, output_dir, s2_client)
+        # Retry-replace any papers whose download failed
+        n_failed = sum(1 for p in papers if p.get("download_path") is None)
+        if n_failed:
+            logger.info("%d of %d downloads failed; retrying with replacements...", n_failed, len(papers))
+            papers = _retry_failed_downloads(papers, G, output_dir, s2_client)
     manifest_path = write_manifest(papers, output_dir)
 
     question_path = None
@@ -212,7 +273,7 @@ def run_context_pack(
     if llm_generate_fn:
         question_text = _generate_question_llm(papers, llm_generate_fn)
         if question_text:
-            question_path = output_dir / "context_pack_question.txt"
+            question_path = output_dir / "literature_search_question.txt"
             question_path.write_text(question_text, encoding="utf-8")
 
     return {

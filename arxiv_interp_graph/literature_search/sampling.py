@@ -1,12 +1,24 @@
 """
-Build a 3-paper context pack: 1 seed + 1–2 forward (citing seed) + 1 backward (cited by seed).
+Build a 3-paper literature search: 1 seed + 1–2 forward (citing seed) + 1 backward (cited by seed).
 Forward/backward from graph; if forward too few, fill via S2 "citing papers" API.
+
+Papers without a download URL (no arxiv_id and no open_access_url) are excluded
+from candidate pools so they won't be sampled. They remain in the graph for
+topology and statistics.
 """
 
 import random
 from typing import Any, Dict, List, Optional
 
 import networkx as nx
+
+
+def _has_download_url(G: nx.DiGraph, nid: str) -> bool:
+    """Return True if the node has an arxiv_id or open_access_url."""
+    attrs = G.nodes.get(nid, {})
+    has_arxiv = attrs.get("arxiv_id") and isinstance(attrs["arxiv_id"], str)
+    has_oa = attrs.get("open_access_url") and isinstance(attrs["open_access_url"], str)
+    return bool(has_arxiv or has_oa)
 
 
 def _node_to_paper(G: nx.DiGraph, nid: str, relation: str, source: str = "graph") -> Dict[str, Any]:
@@ -34,7 +46,7 @@ def _s2_citing_to_paper(item: dict, relation: str = "forward", source: str = "s2
     }
 
 
-def build_context_pack(
+def build_literature_search(
     G: nx.DiGraph,
     seed_id: Optional[str] = None,
     s2_client: Optional[Any] = None,
@@ -42,9 +54,10 @@ def build_context_pack(
     n_backward: int = 1,
     min_forward_from_graph: int = 0,
     seed: Optional[int] = None,
+    n_papers: int = 3,
 ) -> List[Dict[str, Any]]:
     """
-    Assemble context pack = {seed + 2 others} (fixed 3 papers).
+    Assemble literature search = {seed + (n_papers-1) others}.
 
     - Forward = papers that cite the seed (in graph: predecessors of seed).
     - If graph has none or too few forward, call S2 "citing papers" to fill.
@@ -58,17 +71,19 @@ def build_context_pack(
         rng = random.Random()
     else:
         rng = random.Random(seed)
-    nodes = list(G.nodes())
-    if not nodes:
+
+    # Only consider nodes with a download URL for sampling
+    downloadable = [n for n in G.nodes() if _has_download_url(G, n)]
+    if not downloadable:
         return []
 
-    # 1) Choose seed
-    if seed_id is None or seed_id not in G:
-        seed_id = rng.choice(nodes)
+    # 1) Choose seed (only from downloadable papers)
+    if seed_id is None or seed_id not in G or not _has_download_url(G, seed_id):
+        seed_id = rng.choice(downloadable)
     pack: List[Dict[str, Any]] = [_node_to_paper(G, seed_id, "seed", "graph")]
 
     # 2) Forward = papers that cite the seed (predecessors in G: edge X->seed means X cites seed)
-    forward_in_G = list(G.predecessors(seed_id))
+    forward_in_G = [n for n in G.predecessors(seed_id) if _has_download_url(G, n)]
     forward_candidates: List[Dict[str, Any]] = [_node_to_paper(G, n, "forward", "graph") for n in forward_in_G]
 
     if s2_client and len(forward_candidates) < min_forward_from_graph:
@@ -89,11 +104,11 @@ def build_context_pack(
         pack.extend(chosen_forward)
 
     # 4) Backward = papers the seed cites (successors in G)
-    backward_in_G = list(G.successors(seed_id))
+    backward_in_G = [n for n in G.successors(seed_id) if _has_download_url(G, n)]
     backward_candidates = [_node_to_paper(G, n, "backward", "graph") for n in backward_in_G]
 
-    # 5) Fill to 3: add 1 from backward (or more until we have 3)
-    need = 3 - len(pack)
+    # 5) Fill to n_papers: add from backward until we reach the target
+    need = n_papers - len(pack)
     if need > 0 and backward_candidates:
         # Avoid duplicates
         existing_ids = {p["paperId"] for p in pack}
@@ -104,7 +119,7 @@ def build_context_pack(
             pack.extend(chosen_backward)
 
     # If still short (e.g. no backward), fill from remaining forward/backward
-    need = 3 - len(pack)
+    need = n_papers - len(pack)
     if need > 0:
         existing_ids = {p["paperId"] for p in pack}
         rest_forward = [p for p in forward_candidates if p["paperId"] not in existing_ids]
@@ -114,4 +129,4 @@ def build_context_pack(
             chosen = rng.sample(rest, min(need, len(rest)))
             pack.extend(chosen)
 
-    return pack[:3]
+    return pack[:n_papers]

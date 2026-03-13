@@ -23,13 +23,13 @@ def _build_prompt(pdf_dir: Path, template: str) -> str:
     return template.replace("(dir)", str(pdf_dir.resolve()))
 
 
-def _get_agent_command(provider: str, prompt_text: str, literature_dir: Path):
+def _get_agent_command(provider: str, prompt_text: str, literature_dir: Path, model: str = ""):
     """
     Return (cmd_list, subprocess_kwargs) for the selected provider's CLI agent,
     or None if the provider doesn't have a supported CLI agent.
 
-    - anthropic -> claude -p --dangerously-skip-permissions <prompt>
-    - openai    -> codex exec -s workspace-write <prompt>
+    - anthropic -> claude -p --dangerously-skip-permissions [--model MODEL] <prompt>
+    - openai    -> codex exec -s workspace-write [-m MODEL] <prompt>
     """
     provider_lower = (provider or "").lower()
 
@@ -37,14 +37,20 @@ def _get_agent_command(provider: str, prompt_text: str, literature_dir: Path):
         cli = "claude"
         if not shutil.which(cli):
             return None
-        cmd = [cli, "-p", "--dangerously-skip-permissions", prompt_text]
+        cmd = [cli, "-p", "--dangerously-skip-permissions"]
+        if model:
+            cmd += ["--model", model]
+        cmd.append(prompt_text)
         return cmd, {"cwd": str(literature_dir)}
 
     if provider_lower == "openai":
         cli = "codex"
         if not shutil.which(cli):
             return None
-        cmd = [cli, "exec", "-s", "workspace-write", prompt_text]
+        cmd = [cli, "exec", "-s", "workspace-write"]
+        if model:
+            cmd += ["-m", model]
+        cmd.append(prompt_text)
         return cmd, {"cwd": str(literature_dir)}
 
     return None
@@ -56,6 +62,7 @@ def run_agent_question_generation(
     prompt_template: str,
     timeout: int = 600,
     on_progress: Optional[Callable[[str], None]] = None,
+    model: str = "",
 ) -> Optional[str]:
     """
     Invoke a CLI agent (claude or codex) to read PDFs and write Research_Questions.txt.
@@ -73,7 +80,7 @@ def run_agent_question_generation(
 
     prompt_text = _build_prompt(pdf_dir, prompt_template)
 
-    result = _get_agent_command(provider, prompt_text, literature_dir)
+    result = _get_agent_command(provider, prompt_text, literature_dir, model=model)
     if result is None:
         cli_name = "claude" if provider.lower() == "anthropic" else "codex"
         logger.warning(

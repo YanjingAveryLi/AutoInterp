@@ -35,19 +35,19 @@ def is_interactive(config: Dict[str, Any]) -> bool:
     return config.get("interactive_mode", False)
 
 
-def format_stage_output(text: str, stage_name: str, max_lines: int = 80) -> str:
-    """Format pipeline stage output for terminal display with header/separator."""
-    lines = text.splitlines()
-    if len(lines) > max_lines:
-        truncated = lines[:max_lines]
-        truncated.append(f"\n... ({len(lines) - max_lines} more lines, showing first {max_lines}) ...")
-        display_text = "\n".join(truncated)
-    else:
-        display_text = text
+def format_stage_output(text: str, stage_name: str) -> str:
+    """Format pipeline stage output for terminal display with header/separator.
+
+    The output body is coloured #C1DBDB (soft teal) using 24-bit ANSI escapes
+    so the user can immediately see which text is under review.
+    """
+    # 24-bit ANSI colour for #C1DBDB  (R=193 G=219 B=219)
+    _CLR = "\033[38;2;193;219;219m"
+    _RST = "\033[0m"
 
     header = f"[INTERACTIVE] === {stage_name} ==="
     separator = "=" * len(header)
-    return f"\n{separator}\n{header}\n{separator}\n{display_text}\n{separator}"
+    return f"\n{separator}\n{header}\n{separator}\n{_CLR}{text}{_RST}\n{separator}"
 
 
 async def make_revision_call(
@@ -75,12 +75,17 @@ async def make_revision_call(
     prompt = prompt_template.replace("{original_output}", original_output)
     prompt = prompt.replace("{user_feedback}", feedback)
 
-    revised = await llm_interface.generate(
-        prompt=prompt,
-        system_message=system_message,
-        agent_name=agent_name,
-    )
-    return revised
+    try:
+        revised = await llm_interface.generate(
+            prompt=prompt,
+            system_message=system_message,
+            agent_name=agent_name,
+        )
+        return revised
+    except Exception as e:
+        logger.warning("Interactive revision LLM call failed (no API key?): %s", e)
+        print(f"[INTERACTIVE] Revision skipped (LLM call failed: {e}). Keeping original text.")
+        return original_output
 
 
 async def interactive_checkpoint(

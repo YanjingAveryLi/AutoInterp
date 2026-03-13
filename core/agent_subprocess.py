@@ -17,6 +17,7 @@ from typing import Any, Callable, Dict, List, Optional, Set
 logger = logging.getLogger(__name__)
 
 POLL_INTERVAL = 3.0  # seconds between filesystem polls
+HEARTBEAT_INTERVAL = 120.0  # seconds between heartbeat messages when idle
 
 
 @dataclass
@@ -33,15 +34,24 @@ class MilestoneSpec:
     patterns: List[MilestonePattern] = field(default_factory=list)
 
 
-def _snapshot_files(spec: MilestoneSpec) -> Set[str]:
-    """Return the set of files currently matching any milestone pattern."""
-    seen: Set[str] = set()
-    if not spec.watch_dir.exists():
-        return seen
-    for mp in spec.patterns:
-        for match in _glob.glob(str(spec.watch_dir / mp.glob)):
-            seen.add(match)
-    return seen
+def _snapshot_all_files(watch_dir: Path) -> Set[str]:
+    """Return the set of all regular files currently in the watch directory."""
+    if not watch_dir.exists():
+        return set()
+    return {str(f) for f in watch_dir.iterdir() if f.is_file()}
+
+
+def _fmt_elapsed(seconds: float) -> str:
+    """Format seconds into a readable duration string."""
+    if seconds < 60:
+        return f"{seconds:.0f}s"
+    minutes = int(seconds // 60)
+    secs = int(seconds % 60)
+    if minutes < 60:
+        return f"{minutes}m {secs:02d}s"
+    hours = int(minutes // 60)
+    mins = minutes % 60
+    return f"{hours}h {mins:02d}m"
 
 
 def run_agent_with_polling(
@@ -65,16 +75,18 @@ def run_agent_with_polling(
     milestone : MilestoneSpec, optional
         Filesystem patterns to watch for progress updates.
     on_progress : callable, optional
-        Called with a message string each time a new milestone file appears.
+        Called with a message string each time a new milestone file appears,
+        a previously unknown file is detected, or a heartbeat interval elapses.
 
     Returns
     -------
     dict with keys ``success``, ``stdout``, ``stderr``, ``returncode``.
     """
-    # Snapshot existing files before launch
+    # Snapshot ALL existing files in watch_dir before launch so we can
+    # detect any new file the agent creates — not just milestone matches.
     seen_files: Set[str] = set()
     if milestone:
-        seen_files = _snapshot_files(milestone)
+        seen_files = _snapshot_all_files(milestone.watch_dir)
 
     try:
         proc = subprocess.Popen(
@@ -92,6 +104,7 @@ def run_agent_with_polling(
         return {"success": False, "stdout": "", "stderr": str(exc), "returncode": -1}
 
     start_time = time.monotonic()
+    last_event_time = start_time  # tracks last milestone, file event, or heartbeat
 
     # Poll loop: wait for process to finish while checking milestones
     while True:
@@ -119,6 +132,9 @@ def run_agent_with_polling(
         try:
             stdout, stderr = proc.communicate(timeout=remaining)
             # Process finished
+            total = time.monotonic() - start_time
+            if on_progress:
+                on_progress(f"Agent finished ({_fmt_elapsed(total)})")
             return {
                 "success": proc.returncode == 0,
                 "stdout": stdout or "",
@@ -129,13 +145,14 @@ def run_agent_with_polling(
             # Process still running — poll for milestones
             pass
 
-        # Check for new milestone files
+        # Check for ANY new files in the watch directory
         if milestone and on_progress:
-            current_files = _snapshot_files(milestone)
+            current_files = _snapshot_all_files(milestone.watch_dir)
             new_files = current_files - seen_files
             for fpath in sorted(new_files):
                 fname = Path(fpath).name
-                # Find which pattern matched and get the message
+                # Check if it matches a milestone pattern for a specific message
+                matched = False
                 for mp in milestone.patterns:
                     if _glob.fnmatch.fnmatch(fname, mp.glob):
                         try:
@@ -143,7 +160,16 @@ def run_agent_with_polling(
                             on_progress(msg)
                         except Exception:
                             on_progress(f"New file: {fname}")
+                        matched = True
                         break
-                else:
+                if not matched:
                     on_progress(f"New file: {fname}")
+                last_event_time = time.monotonic()
             seen_files = current_files
+
+        # Heartbeat: emit a "still running" message when no events for a while
+        if on_progress:
+            since_event = time.monotonic() - last_event_time
+            if since_event >= HEARTBEAT_INTERVAL:
+                on_progress(f"Still running... {_fmt_elapsed(elapsed)} elapsed")
+                last_event_time = time.monotonic()

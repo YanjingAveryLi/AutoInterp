@@ -50,8 +50,6 @@ import torch
 import warnings
 warnings.filterwarnings("ignore", "Can't initialize NVML")
 
-import transformer_lens
-from transformer_lens import HookedTransformer
 import transformers
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -399,9 +397,8 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
         # Comprehensive mapping of module names to pip install names  
         pip_module_map = {
             # Machine Learning & AI
-            "transformer_lens": "transformer-lens",
             "sklearn": "scikit-learn",
-            "scikit_learn": "scikit-learn", 
+            "scikit_learn": "scikit-learn",
             "cv2": "opencv-python",
             "PIL": "Pillow",
             "Image": "Pillow",
@@ -1145,7 +1142,7 @@ if __name__ == "__main__":
                 print(f"[AUTOINTERP] Exception installing nltk: {str(e)}")
                 
             # Install other critical packages
-            for pkg in ["transformer-lens", "transformers", "torch"]:
+            for pkg in ["transformers", "torch"]:
                 print(f"[AUTOINTERP] Installing critical package {pkg}...")
                 try:
                     pkg_cmd = [str(pip_path), "install", "--verbose", pkg]
@@ -1162,11 +1159,11 @@ if __name__ == "__main__":
         # Verify critical packages are installed correctly
         try:
             # Check for key packages
-            packages_to_verify = ["transformer_lens", "scikit-learn"]
+            packages_to_verify = ["scikit-learn"]
             missing_packages = []
             
             for package in packages_to_verify:
-                # Convert package name to directory name (transformer_lens -> transformer_lens, scikit-learn -> sklearn)
+                # Convert package name to directory name (scikit-learn -> sklearn)
                 pkg_dir = "sklearn" if package == "scikit-learn" else package.replace("-", "_")
                 
                 # Check if package directory exists in site-packages

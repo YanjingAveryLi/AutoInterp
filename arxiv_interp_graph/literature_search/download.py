@@ -1,5 +1,5 @@
 """
-Download articles for context pack papers and write manifest.json.
+Download articles for literature search papers and write manifest.json.
 
 Supports both PDF (arxiv, conference open access) and HTML (Distill, Transformer
 Circuits Thread) articles. Prefers arxiv PDF URLs constructed from stored arxiv_id.
@@ -128,7 +128,7 @@ def _download_article(url: str, base_path: Path, timeout: int = 30) -> Tuple[Opt
         return None, ""
 
 
-def download_context_pack_pdfs(
+def download_literature_search_pdfs(
     papers: List[Dict[str, Any]],
     output_dir: Path,
     s2_client: Optional[Any] = None,

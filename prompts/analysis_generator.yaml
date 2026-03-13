@@ -16,18 +16,20 @@ base_template: |
   
   Model: {model_name}
   Model Path: {model_path}
+  Vision Model: {vision_model}
+  Reasoning Model: {reasoning_model}
   
   {analysis_plan}
   
-  Write a Python script to investigate this question using transformer-lens, a library for interpreting transformer language models. Implement the analysis exactly according to the ANALYSIS PLAN above.
-  
-  IMPORTANT: Your response MUST be ONLY executable Python code with no surrounding text or explanations. 
+  Write a Python script to investigate this question. Implement the analysis exactly according to the ANALYSIS PLAN above.
+
+  IMPORTANT: Your response MUST be ONLY executable Python code with no surrounding text or explanations.
   Do not prefix your response with phrases like "Here's a Python script..." or "This code will...".
   Any explanations or notes must be included as comments within the code.
-  
+
   The script should:
-  
-  1. Use transformer_lens to load and analyze the model
+
+  1. Load and analyze the model
   2. Be well-documented with clear comments, both in the code and alongside printed output
   3. PRINT the results to stdout - do not save them as a variable - the system captures all printed output
   4. Don't do any visualizations - just print the results to stdout. The stdout will be read by a text-based LLM, so do not print excessive outputs.

@@ -151,7 +151,10 @@ class LLMInterface:
         self.path_resolver = PathResolver(config)
 
         # Get provider-specific configurations from top level
-        if self.provider == "anthropic":
+        # Always set anthropic_api_version if the provider config exists,
+        # since generate() can dispatch to _generate_anthropic() for a
+        # different agent even if this instance's default provider isn't anthropic.
+        if "anthropic" in providers_config:
             provider_config = providers_config["anthropic"]
             if "api_version" not in provider_config:
                 raise ValueError("No API version specified in Anthropic provider config")

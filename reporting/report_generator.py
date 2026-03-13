@@ -1979,8 +1979,7 @@ plt.show()
         import re
         IMPORT_TO_PIP = {
             "sklearn": "scikit-learn", "cv2": "opencv-python", "PIL": "Pillow",
-            "yaml": "PyYAML", "transformer_lens": "transformer_lens", 
-            "plotly": "plotly", "wandb": "wandb", "jaxtyping": "jaxtyping"
+            "yaml": "PyYAML", "plotly": "plotly", "wandb": "wandb", "jaxtyping": "jaxtyping"
         }
         STDLIB = {"os", "sys", "json", "math", "re", "time", "typing", "pathlib", "numpy", "pandas", "torch"}
         
@@ -1988,7 +1987,7 @@ plt.show()
         all_code = "\n".join([a.get("code", "") for a in analyses])
         matches = re.findall(r'^\s*(?:from|import)\s+(\w+)', all_code, re.MULTILINE)
         
-        found = {"transformer_lens", "torch", "einops", "jaxtyping"} # Core defaults
+        found = {"torch", "einops", "jaxtyping"} # Core defaults
         for module in matches:
             if module not in STDLIB:
                 found.add(IMPORT_TO_PIP.get(module, module))

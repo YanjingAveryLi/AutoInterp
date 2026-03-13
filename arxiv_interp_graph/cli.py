@@ -76,9 +76,9 @@ def cmd_export(args):
         export_interactive(G)
 
 
-def cmd_context_pack(args):
-    """Build 3-paper context pack (seed + forward + backward), download PDFs, manifest, optional LLM question."""
-    from context_pack.run import run_context_pack
+def cmd_literature_search(args):
+    """Build 3-paper literature search (seed + forward + backward), download PDFs, manifest, optional LLM question."""
+    from literature_search.run import run_literature_search
 
     base = os.path.dirname(os.path.abspath(__file__))
     graph_path = args.graph
@@ -92,7 +92,7 @@ def cmd_context_pack(args):
         from datetime import datetime
         ts = datetime.utcnow().strftime("%Y-%m-%dT%H-%M-%S")
         repo_root = os.path.join(base, "..")
-        output_dir = os.path.join(repo_root, "projects", f"context_pack_{ts}", "questions")
+        output_dir = os.path.join(repo_root, "projects", f"literature_search_{ts}", "questions")
     else:
         output_dir = os.path.abspath(args.output_dir)
     os.makedirs(output_dir, exist_ok=True)
@@ -117,7 +117,7 @@ def cmd_context_pack(args):
                         root = yaml.safe_load(f) or {}
                     llm_config = root.get("llm") or {}
             if llm_config and (llm_config.get("provider") or llm_config.get("model")):
-                from context_pack.llm_client import get_llm_generate_fn
+                from literature_search.llm_client import get_llm_generate_fn
                 llm_generate_fn = get_llm_generate_fn(
                     provider=llm_config.get("provider"),
                     model=llm_config.get("model"),
@@ -127,7 +127,7 @@ def cmd_context_pack(args):
         except Exception as e:
             print("LLM config load failed:", e)
 
-    result = run_context_pack(
+    result = run_literature_search(
         graph_path=graph_path,
         output_dir=output_dir,
         seed_id=args.seed_id,
@@ -137,14 +137,14 @@ def cmd_context_pack(args):
         llm_generate_fn=llm_generate_fn,
     )
     papers = result.get("papers", [])
-    print(f"Context pack: {len(papers)} papers")
+    print(f"Literature search: {len(papers)} papers")
     for p in papers:
         print(f"  [{p.get('relation')}] {p.get('paperId')} {p.get('title', '')[:50]}...")
     if result.get("manifest_path"):
         print(f"  manifest: {result['manifest_path']}")
     if result.get("question_path"):
         print(f"  question: {result['question_path']}")
-    # Auto-rename project folder from context_pack_<ts> to <slug>_<ts> using QUESTION line
+    # Auto-rename project folder from literature_search_<ts> to <slug>_<ts> using QUESTION line
     if args.output_dir is None and result.get("question_text"):
         qtext = result["question_text"]
         q_match = re.search(r"QUESTION:\s*(.+?)(?:\n|$)", qtext, re.IGNORECASE | re.DOTALL)
@@ -211,15 +211,15 @@ def main():
                                default="all", help="Export format (default: all)")
     export_parser.set_defaults(func=cmd_export)
 
-    # context-pack: seed + forward/backward -> 3 papers -> PDFs + manifest -> optional LLM question
-    ctx_parser = subparsers.add_parser("context-pack", help="Build 3-paper context pack (seed + citing + cited), download PDFs, manifest, optional research question)")
+    # literature-search: seed + forward/backward -> 3 papers -> PDFs + manifest -> optional LLM question
+    ctx_parser = subparsers.add_parser("literature-search", help="Build 3-paper literature search (seed + citing + cited), download PDFs, manifest, optional research question)")
     ctx_parser.add_argument("--graph", default="output/graph_state.json", help="Path to graph_state.json")
     ctx_parser.add_argument("--output-dir", default=None, help="Output directory; default: auto from generated question")
     ctx_parser.add_argument("--seed-id", default=None, help="Seed paper ID (default: random from graph)")
     ctx_parser.add_argument("--seed", type=int, default=None, help="Random seed (default: different each run; set e.g. 42 for reproducibility)")
     ctx_parser.add_argument("--no-download", action="store_true", help="Do not download PDFs")
     ctx_parser.add_argument("--no-llm", action="store_true", help="Do not generate research question with LLM")
-    ctx_parser.set_defaults(func=cmd_context_pack)
+    ctx_parser.set_defaults(func=cmd_literature_search)
 
     # enrich-abstracts: fetch abstract for all nodes and update graph_state.json
     enrich_parser = subparsers.add_parser("enrich-abstracts", help="Fetch abstracts for all papers from Semantic Scholar and update graph_state.json")

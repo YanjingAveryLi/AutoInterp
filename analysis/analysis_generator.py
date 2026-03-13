@@ -102,6 +102,8 @@ class AnalysisGenerator:
         model_info = task_config.get("model", {})
         model_name = model_info.get("name", "gpt2")
         model_path = model_info.get("path", model_name)
+        vision_model = model_info.get("vision_model", "")
+        reasoning_model = model_info.get("reasoning_model", "")
         
         # Extract analysis parameters from task config
         analysis_params = task_config.get("analysis_parameters", {})
@@ -130,6 +132,8 @@ class AnalysisGenerator:
             question=question,
             model_name=model_name,
             model_path=model_path,
+            vision_model=vision_model,
+            reasoning_model=reasoning_model,
             analysis_params=analysis_params,
             previous_insights=previous_insights,
             analysis_plan=analysis_plan,  # Still passing it for backward compatibility
@@ -168,9 +172,6 @@ class AnalysisGenerator:
         if "plt." in analysis_code and "import matplotlib.pyplot as plt" not in analysis_code:
             analysis_code = "import matplotlib.pyplot as plt\n" + analysis_code
             
-        if "transformer_lens" in analysis_code and "import transformer_lens" not in analysis_code:
-            analysis_code = "import transformer_lens\n" + analysis_code
-        
         # Save the generated code using the new directory structure
         timestamp = get_timestamp().replace(" ", "_").replace(":", "-")
         
@@ -242,25 +243,31 @@ class AnalysisGenerator:
                              question: Union[str, Dict[str, Any]],
                              model_name: str,
                              model_path: str,
-                             analysis_params: Dict[str, Any],
+                             vision_model: str = "",
+                             reasoning_model: str = "",
+                             analysis_params: Dict[str, Any] = None,
                              previous_insights: str = "",
                              analysis_plan: Optional[str] = None,
                              error_context: Optional[Dict[str, Any]] = None) -> str:
         """
         Build a specification for code generation.
-        
+
         Args:
             question: The raw question text or a dictionary (will be converted to string)
             model_name: Name of the model
             model_path: Path to the model
+            vision_model: HuggingFace model for vision tasks
+            reasoning_model: HuggingFace model for reasoning tasks
             analysis_params: Additional analysis parameters
             previous_insights: Insights from previous analyses in notebooks
             analysis_plan: Optional analysis plan from the analysis_planner agent
             error_context: Optional error information from a previous failed run
-            
+
         Returns:
             Specification string for code generation
         """
+        if analysis_params is None:
+            analysis_params = {}
         # Use question text directly (should already be a string at this point)
         question_text = question if question else "No question text available"
         
@@ -300,13 +307,15 @@ class AnalysisGenerator:
                 question_text=question_text,
                 model_name=model_name,
                 model_path=model_path,
+                vision_model=vision_model,
+                reasoning_model=reasoning_model,
                 analysis_plan=analysis_plan if analysis_plan else "",  # Use empty string if no plan
                 project_dir=str(self.path_resolver.get_project_dir())  # Add project directory path
             )
         else:
             # Try to get base template from prompts config
             base_template = self.config.get("prompts", {}).get("analysis_generator", {}).get("base_template")
-            
+
             if base_template:
                 # Use the template from prompts config
                 # Include analysis_plan in the template formatting
@@ -314,6 +323,8 @@ class AnalysisGenerator:
                     question_text=question_text,
                     model_name=model_name,
                     model_path=model_path,
+                    vision_model=vision_model,
+                    reasoning_model=reasoning_model,
                     analysis_plan=analysis_plan if analysis_plan else "",  # Use empty string if no plan
                     project_dir=str(self.path_resolver.get_project_dir())  # Add project directory path
                 )
@@ -332,16 +343,16 @@ Model Path: {model_path}
 
 {analysis_plan}
   
-Write a Python script to answer this question using transformer-lens, a library for interpreting transformer language models. Implement the analysis exactly according to the ANALYSIS PLAN above.
-  
-IMPORTANT: Your response MUST be ONLY executable Python code with no surrounding text or explanations. 
+Write a Python script to answer this question. Implement the analysis exactly according to the ANALYSIS PLAN above.
+
+IMPORTANT: Your response MUST be ONLY executable Python code with no surrounding text or explanations.
 Do not prefix your response with phrases like "Here's a Python script..." or "This code will...".
 Any explanations or notes must be included as comments within the code.
-  
+
 The script should:
-  
-1. Use transformer_lens to load and analyze the model
-2. Return structured results as a dictionary 
+
+1. Load and analyze the model
+2. Return structured results as a dictionary
 3. Be well-documented with clear comments, both in the code and alongside printed output
 4. PRINT the results to stdout - do not save them as a variable - the system captures all printed output
 5. Don't do any visualizations - just print the results to stdout
@@ -352,6 +363,8 @@ The script should:
                     question_text=question_text,
                     model_name=model_name,
                     model_path=model_path,
+                    vision_model=vision_model,
+                    reasoning_model=reasoning_model,
                     analysis_plan=analysis_plan if analysis_plan else "",
                     project_dir=str(self.path_resolver.get_project_dir())  # Add project directory path
                 )

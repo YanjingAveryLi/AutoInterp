@@ -23,7 +23,7 @@ prompt_template: |
 
   ### Step 3 — Write Code
   Write one or more Python scripts (.py files) in your working directory that execute the analysis. The scripts should:
-  - Use TransformerLens (HookedTransformer) with the model "{model_name}" loaded from "{model_path}"
+  - Load the model "{model_name}" from "{model_path}"
   - Print all key results to stdout (numerical values, tables, summaries)
   - Save any generated figures as .png files in this directory
   - Be self-contained (all imports, model loading, and analysis in the script)
@@ -47,7 +47,9 @@ prompt_template: |
   - Suggestions for the next analysis iteration (if any)
 
   ### Step 7 — Update Confidence
-  Read the file ../background/confidence.json. It tracks our running confidence that we have adequately answered the research question. The schema is:
+  The pipeline tracks research progress via a confidence file at EXACTLY this path: ../background/confidence.json (relative to your working directory). You MUST update this specific file — the pipeline reads ONLY this file to decide whether to continue or stop. If you do not update it, confidence stays at 0.00 and the pipeline will run all iterations without knowing you made progress.
+
+  1. Read ../background/confidence.json. Its schema is:
   ```json
   {{
     "current_confidence": 0.0,
@@ -60,18 +62,19 @@ prompt_template: |
     ]
   }}
   ```
-  Based on the cumulative evidence from ALL analyses so far (not just this one), update the file:
-  - Append a new entry to the "history" array with "analysis": {n}, your updated confidence (0.0 to 1.0), and a brief rationale
-  - Update "current_confidence" to match your new confidence value
-  - Confidence of 0.85+ means the research question has been adequately answered
-  - Be calibrated: early analyses should have lower confidence; confidence should increase as evidence accumulates
-  Write the updated JSON back to ../background/confidence.json.
+  2. Based on the cumulative evidence from ALL analyses so far (not just this one), update the JSON:
+     - Append a new entry to the "history" array with "analysis": {n}, your updated confidence (0.0 to 1.0), and a brief rationale
+     - Set "current_confidence" to your new confidence value
+     - Confidence of 0.85+ means the research question has been adequately answered
+     - Be calibrated: early analyses should have lower confidence; confidence should increase as evidence accumulates
+  3. Write the updated JSON back to ../background/confidence.json — overwrite the file in place. Do NOT write to any other filename (no "proposed" or "update" files). The pipeline only reads ../background/confidence.json.
 
   ### Step 8 — Summary
   Print a one-paragraph summary of your findings to stdout as your final action.
 
   ## Important Notes
   - You are running on a consumer GPU. The model "{model_name}" should fit comfortably.
+  - **Recommended models:** For standard text analysis, use "{model_name}". For tasks requiring vision (image understanding, chart reading), use "{vision_model}". For tasks requiring advanced reasoning (math, logic, complex multi-step inference), use "{reasoning_model}". Choose the model that best fits your analysis plan. You may use multiple models in a single analysis if needed.
   - Do NOT train or fine-tune the model. Only observe activations, weights, logits, and behaviors.
   - Do NOT download external datasets. Generate any needed test inputs programmatically.
   - Your working directory is analysis_{n}/. Write all output files here.

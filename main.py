@@ -85,6 +85,12 @@ from AutoInterp.repo.agent_repo import (
     run_repo_agent,
     read_repo_outputs,
 )
+from AutoInterp.questions.agent_questions import (
+    load_questions_prompt_template,
+    _build_questions_prompt,
+    run_questions_agent,
+    read_questions_outputs,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -236,6 +242,7 @@ OPTIONS_SETTINGS = [
     {"key": "analysis.use_agent",            "label": "Use CLI agent for analysis",     "type": "bool",  "help": "true = CLI agent, false = legacy pipeline"},
     {"key": "reporting.use_agent",           "label": "Use CLI agent for report",       "type": "bool",  "help": "true = CLI agent, false = legacy pipeline"},
     {"key": "visualization.use_agent",      "label": "Use CLI agent for visualization","type": "bool",  "help": "true = CLI agent, false = legacy pipeline"},
+    {"key": "questions.use_agent",         "label": "Use CLI agent for questions",    "type": "bool",  "help": "true = CLI agent gen+prioritize, false = API calls"},
     {"key": "literature_search.enabled",          "label": "Literature search",                      "type": "bool", "help": "Sample papers and generate grounded questions"},
     {"key": "literature_search.n_papers",         "label": "Articles for question gen",              "type": "int",  "help": "Number of papers sampled from graph"},
     {"key": "visualization.default_format",  "label": "Visualization format",           "type": "str",   "choices": ["png", "svg", "pdf"]},
@@ -875,33 +882,37 @@ async def prioritize_questions(
     llm_interface: LLMInterface,
     config: Dict[str, Any],
     logger: Any,
-    evaluator: Optional[Evaluator] = None
+    evaluator: Optional[Evaluator] = None,
+    skip_llm_call: bool = False,
 ) -> Dict[str, Any]:
     """
     Prioritize questions using the question_prioritizer agent.
-    
+
     Args:
         question_manager: Manager for question tracking
         llm_interface: LLM interface for interacting with language models
         config: Configuration dictionary
         logger: Logging instance
         evaluator: Optional evaluator instance for updating after project rename
-        
+        skip_llm_call: If True, skip the LLM API call (file already on disk from agent)
+
     Returns:
         Selected question to investigate
     """
     logger.info("Prioritizing questions...")
     print("[AUTOINTERP] PHASE 2/4: Question Prioritization")
-    
+
     # Get task details for context
     # Generate a task name from the description for logging
     task_description = config.get("task", {}).get("description", "")
     task_name = task_description[:50] + "..." if len(task_description) > 50 else task_description or "Unnamed Task"
     task_description = config.get("task", {}).get("description", "")
-    
+
     # Call prioritize_questions to have the question_prioritizer agent select a question
     # It now saves the output to prioritized_question.txt and returns empty list
-    await question_manager.prioritize_questions()
+    # Skip if the questions agent already wrote the file
+    if not skip_llm_call:
+        await question_manager.prioritize_questions()
     
     # Read the prioritized question from file and print it directly
     prioritized_path = question_manager.storage_dir / "prioritized_question.txt"
@@ -1729,8 +1740,10 @@ async def iterative_analysis_agent(
 
     # Model info from config
     model_cfg = config.get("model", {})
-    model_name = model_cfg.get("name", "meta-llama/Llama-3.2-1B-Instruct")
+    model_name = model_cfg.get("name", "meta-llama/Llama-3.2-3B-Instruct")
     model_path = model_cfg.get("tokenizer", model_name)
+    vision_model = model_cfg.get("vision_model", "")
+    reasoning_model = model_cfg.get("reasoning_model", "")
 
     # Load prompt template
     try:
@@ -1772,6 +1785,8 @@ async def iterative_analysis_agent(
             prompt_template=prompt_template,
             model_name=model_name,
             model_path=model_path,
+            vision_model=vision_model,
+            reasoning_model=reasoning_model,
         )
 
         # Run agent
@@ -1789,6 +1804,7 @@ async def iterative_analysis_agent(
             timeout=agent_timeout,
             on_progress=_analysis_progress_cb,
             iteration_n=iteration,
+            model=llm_config.get("model", ""),
         )
         _agent_duration = _time.time() - _agent_start
 
@@ -1796,6 +1812,44 @@ async def iterative_analysis_agent(
         outputs = read_agent_outputs(analysis_root, iteration)
         new_conf = read_confidence(analysis_root)
         new_confidence = new_conf.get("current_confidence", current_confidence)
+
+        # Fallback: if confidence didn't change, check if the agent wrote a
+        # proposed/update file in the iteration directory instead of updating
+        # ../background/confidence.json directly (common with codex).
+        if new_confidence == current_confidence:
+            import glob as _glob_conf
+            _iter_dir = analysis_root / f"analysis_{iteration}"
+            _proposed_files = _glob_conf.glob(str(_iter_dir / "*confidence*.json")) + \
+                              _glob_conf.glob(str(_iter_dir / "*CONFIDENCE*.json"))
+            for _pf in _proposed_files:
+                try:
+                    _pdata = json.loads(Path(_pf).read_text(encoding="utf-8"))
+                    _proposed_val = _pdata.get("current_confidence")
+                    if _proposed_val is not None and isinstance(_proposed_val, (int, float)):
+                        logger.info("Applying proposed confidence from %s: %.2f", _pf, _proposed_val)
+                        print(f"[AUTOINTERP] Found proposed confidence in {Path(_pf).name} — applying to confidence.json")
+                        # Merge into the canonical confidence.json
+                        conf_path = analysis_root / "background" / "confidence.json"
+                        new_conf["current_confidence"] = float(_proposed_val)
+                        if isinstance(_pdata.get("history"), list) and _pdata["history"]:
+                            new_conf.setdefault("history", []).extend(_pdata["history"])
+                        elif "rationale" in _pdata:
+                            new_conf.setdefault("history", []).append({
+                                "analysis": iteration,
+                                "confidence": float(_proposed_val),
+                                "rationale": _pdata.get("rationale", ""),
+                            })
+                        else:
+                            new_conf.setdefault("history", []).append({
+                                "analysis": iteration,
+                                "confidence": float(_proposed_val),
+                                "rationale": "(applied from proposed file)",
+                            })
+                        conf_path.write_text(json.dumps(new_conf, indent=2), encoding="utf-8")
+                        new_confidence = float(_proposed_val)
+                        break
+                except (json.JSONDecodeError, OSError, ValueError) as _exc:
+                    logger.warning("Could not read proposed confidence file %s: %s", _pf, _exc)
 
         # Build analysis dict (compatible with downstream)
         script_content = "\n\n".join(s["content"] for s in outputs["scripts"]) if outputs["scripts"] else ""
@@ -2745,6 +2799,7 @@ async def generate_report(
                 prompt_text=_viz_prompt_text,
                 timeout=_viz_agent_timeout,
                 on_progress=_viz_progress_cb,
+                model=config.get("llm", {}).get("model", ""),
             )
 
             visualizations = read_visualization_outputs(viz_dir)
@@ -2823,6 +2878,7 @@ async def generate_report(
                 prompt_text=prompt_text,
                 timeout=agent_timeout,
                 on_progress=_report_progress_cb,
+                model=config.get("llm", {}).get("model", ""),
             )
 
             outputs = read_report_outputs(path_resolver.get_project_dir())
@@ -3070,6 +3126,7 @@ async def streamlined_pipeline(framework: Dict[str, Any]) -> Dict[str, Any]:
                                 prompt_template=prompt_template,
                                 timeout=agent_timeout,
                                 on_progress=_qgen_progress_cb,
+                                model=llm_config.get("model", ""),
                             ) or ""
 
                         # Fallback to LLM API call if agent didn't produce output
@@ -3140,29 +3197,129 @@ async def streamlined_pipeline(framework: Dict[str, Any]) -> Dict[str, Any]:
                 traceback.print_exc()
                 print("[AUTOINTERP] Falling back to normal question generation.")
 
-        # If literature search didn't produce a question, use standard LLM question generation
+        # If literature search didn't produce a question, use standard question generation
+        # Try CLI agent first (handles gen + prioritization in one subprocess), then fall back to API
+        _questions_agent_handled_gen = False
+        _questions_agent_handled_pri = False
+
         if not use_literature_search_question:
-            await generate_questions(
-                llm_interface=framework["llm_interface"],
-                question_manager=framework["question_manager"],
-                config=config,
-                logger=logger
+            import shutil as _q_shutil
+            questions_cfg = config.get("questions", {})
+            _q_use_agent = questions_cfg.get("use_agent", True)
+            _q_provider = (config.get("llm", {}).get("provider") or "").lower()
+            _q_agent_available = (
+                _q_use_agent
+                and _q_provider in ("anthropic", "openai")
+                and _q_shutil.which("claude" if _q_provider == "anthropic" else "codex") is not None
             )
 
+            if _q_agent_available:
+                print("[AUTOINTERP] Using CLI agent for question generation + prioritization")
+                try:
+                    _q_template = load_questions_prompt_template()
+                    _q_task_desc = config.get("task", {}).get("description", "")
+                    _q_prompt = _build_questions_prompt(_q_template, _q_task_desc)
+                    _q_timeout = questions_cfg.get("agent_timeout", 300)
+                    _q_model = config.get("llm", {}).get("model", "")
+                    _q_start = time.time()
+
+                    _q_progress_cb = None
+                    if pipeline_ui:
+                        def _q_progress_cb(msg):
+                            pipeline_ui.step_progress("question_generation", msg)
+
+                    _q_result = run_questions_agent(
+                        provider=_q_provider,
+                        project_dir=path_resolver.get_project_dir(),
+                        prompt_text=_q_prompt,
+                        timeout=_q_timeout,
+                        on_progress=_q_progress_cb,
+                        model=_q_model,
+                    )
+
+                    _q_outputs = read_questions_outputs(path_resolver.get_project_dir())
+
+                    if _q_outputs["has_questions"]:
+                        _questions_agent_handled_gen = True
+                        print(f"[AUTOINTERP] Questions agent wrote questions.txt")
+
+                    if _q_outputs["has_prioritized"]:
+                        _questions_agent_handled_pri = True
+                        print(f"[AUTOINTERP] Questions agent wrote prioritized_question.txt")
+
+                        # Print agent output
+                        print("\n============= QUESTIONS AGENT OUTPUT (prioritized) =============")
+                        print(_q_outputs["prioritized_text"])
+                        print("================================================================\n")
+
+                    # Record the interaction in the dashboard
+                    if pipeline_ui:
+                        _q_duration = time.time() - _q_start
+                        pipeline_ui.llm_call_complete(
+                            agent_name="questions_agent",
+                            display_name="Questions Agent (Generate + Prioritize)",
+                            prompt=_q_prompt[:2000] + "..." if len(_q_prompt) > 2000 else _q_prompt,
+                            system_message=None,
+                            response=_q_outputs.get("prioritized_text") or _q_outputs.get("questions_text") or "(no output)",
+                            model=f"{_q_provider} CLI agent",
+                            provider=_q_provider,
+                            temperature=0,
+                            max_tokens=0,
+                            duration_seconds=_q_duration,
+                            step_id="question_generation",
+                        )
+
+                except Exception as e:
+                    logger.warning(f"Questions agent failed: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    print("[AUTOINTERP] Questions agent failed; falling back to API pipeline.")
+            elif _q_use_agent and _q_provider in ("anthropic", "openai"):
+                cli_name = "claude" if _q_provider == "anthropic" else "codex"
+                print(f"[AUTOINTERP] Questions agent enabled but '{cli_name}' CLI not found; falling back to API.")
+
+            # Fall back to API for question generation if agent didn't handle it
+            if not _questions_agent_handled_gen:
+                await generate_questions(
+                    llm_interface=framework["llm_interface"],
+                    question_manager=framework["question_manager"],
+                    config=config,
+                    logger=logger
+                )
+
         if pipeline_ui:
-            qg_summary = "from literature (literature search)" if use_literature_search_question else "LLM-generated"
+            if use_literature_search_question:
+                qg_summary = "from literature (literature search)"
+            elif _questions_agent_handled_gen:
+                qg_summary = "CLI agent"
+            else:
+                qg_summary = "LLM-generated"
             pipeline_ui.step_complete("question_generation", summary=qg_summary)
 
-        # 2. Question Prioritization (always runs)
+        # 2. Question Prioritization (skip if agent already handled it)
         if pipeline_ui:
             pipeline_ui.step_start("question_prioritization")
-        active_question = await prioritize_questions(
-            question_manager=framework["question_manager"],
-            llm_interface=framework["llm_interface"],
-            config=config,
-            logger=logger,
-            evaluator=framework["evaluator"]
-        )
+
+        if _questions_agent_handled_pri:
+            # Agent already wrote prioritized_question.txt — read it directly
+            # and run the same title extraction + project rename logic
+            print("[AUTOINTERP] PHASE 2/4: Question Prioritization (handled by questions agent)")
+            active_question = await prioritize_questions(
+                question_manager=framework["question_manager"],
+                llm_interface=framework["llm_interface"],
+                config=config,
+                logger=logger,
+                evaluator=framework["evaluator"],
+                skip_llm_call=True,
+            )
+        else:
+            active_question = await prioritize_questions(
+                question_manager=framework["question_manager"],
+                llm_interface=framework["llm_interface"],
+                config=config,
+                logger=logger,
+                evaluator=framework["evaluator"]
+            )
         if pipeline_ui:
             # Show first 80 chars of the selected question as summary
             summary = active_question[:80] + "..." if len(active_question) > 80 else active_question
@@ -3314,6 +3471,7 @@ async def streamlined_pipeline(framework: Dict[str, Any]) -> Dict[str, Any]:
                             timeout=_ac_timeout,
                             round_number=_ac_round,
                             on_progress=_ac_progress_cb,
+                            model=config.get("llm", {}).get("model", ""),
                         )
 
                         _ac_outputs = read_autocritique_outputs(path_resolver.get_project_dir(), round_number=_ac_round)
@@ -3418,6 +3576,7 @@ async def streamlined_pipeline(framework: Dict[str, Any]) -> Dict[str, Any]:
                                 round_number=_ac_round,
                                 recommendation_idx=_rec_idx,
                                 on_progress=_rev_progress_cb,
+                                model=config.get("llm", {}).get("model", ""),
                             )
 
                             _rev_out = read_revision_outputs(
@@ -3474,6 +3633,7 @@ async def streamlined_pipeline(framework: Dict[str, Any]) -> Dict[str, Any]:
                             timeout=_rr_timeout,
                             round_number=_ac_round,
                             on_progress=_rr_progress_cb,
+                            model=config.get("llm", {}).get("model", ""),
                         )
 
                         _rr_outputs = read_report_revision_outputs(
@@ -3597,6 +3757,7 @@ async def streamlined_pipeline(framework: Dict[str, Any]) -> Dict[str, Any]:
                         prompt_text=_repo_prompt_text,
                         timeout=_repo_timeout,
                         on_progress=_repo_progress_cb,
+                        model=config.get("llm", {}).get("model", ""),
                     )
 
                     _repo_outputs = read_repo_outputs(path_resolver.get_project_dir())
@@ -3962,17 +4123,36 @@ async def async_main(args: argparse.Namespace) -> None:
                 print("[AUTOINTERP] No topic provided. The literature search will generate a research question from the literature.")
                 framework["config"]["task"]["description"] = "LLM interpretability research"
             else:
-                print("[AUTOINTERP] No topic provided. Generating a topic with LLM...")
-                try:
-                    generated_topic = await framework["question_manager"].generate_topic()
-                    print(f"[AUTOINTERP] Generated topic: {generated_topic}")
-                    framework["config"]["task"]["description"] = generated_topic
-                except Exception as e:
-                    print(f"[AUTOINTERP] Error generating topic: {e}")
-                    print("[AUTOINTERP] No task description available. Please provide a topic manually.")
+                # Check if the questions agent is available — if so, defer topic
+                # generation to the agent (it handles generic/empty topics).
+                import shutil as _tg_shutil
+                _tg_cfg = framework["config"].get("questions", {})
+                _tg_provider = (framework["config"].get("llm", {}).get("provider") or "").lower()
+                _tg_agent_available = (
+                    _tg_cfg.get("use_agent", True)
+                    and _tg_provider in ("anthropic", "openai")
+                    and _tg_shutil.which("claude" if _tg_provider == "anthropic" else "codex") is not None
+                )
+                if _tg_agent_available:
+                    print("[AUTOINTERP] No topic provided. The questions agent will generate a creative topic.")
+                    framework["config"]["task"]["description"] = "LLM interpretability research"
+                else:
+                    print("[AUTOINTERP] No topic provided. Generating a topic with LLM...")
+                    try:
+                        generated_topic = await framework["question_manager"].generate_topic()
+                        print(f"[AUTOINTERP] Generated topic: {generated_topic}")
+                        framework["config"]["task"]["description"] = generated_topic
+                    except Exception as e:
+                        print(f"[AUTOINTERP] Error generating topic: {e}")
+                        print("[AUTOINTERP] No task description available. Please provide a topic manually.")
         else:
             print(f"[AUTOINTERP] Using your topic: {user_input}")
             framework["config"]["task"]["description"] = user_input
+            # User provided a topic — skip literature search so the pipeline
+            # goes straight to question generation from this topic.
+            if framework["config"].get("literature_search", {}).get("enabled", False):
+                framework["config"]["literature_search"]["enabled"] = False
+                print("[AUTOINTERP] Literature search disabled (user provided a topic).")
         
         # Get project directory
         projects_dir = Path(framework["config"].get("paths", {}).get("projects", "projects"))

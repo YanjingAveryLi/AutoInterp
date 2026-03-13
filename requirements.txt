@@ -10,7 +10,6 @@ nltk>=3.7
 # Machine learning and LLM tools
 torch>=1.10.0
 transformers>=4.15.0
-transformer_lens>=1.5.0
 datasets>=1.18.0
 scikit-learn>=1.0.0
 faiss-cpu>=1.7.0  # For semantic search in future updates
