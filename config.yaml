@@ -116,6 +116,12 @@ repo:
   use_agent: true             # Use CLI agent (claude/codex) for repo assembly
   agent_timeout: 4200         # Subprocess timeout in seconds for repo agent
 
+# Notebook generation settings — create executable Jupyter notebook from repo
+notebook:
+  enabled: true               # Generate Jupyter notebook after repo assembly
+  use_agent: true             # Use CLI agent (claude/codex) for notebook generation
+  agent_timeout: 4200         # Subprocess timeout in seconds for notebook agent
+
 # Computational resources
 resources:
   max_gpu_memory: 8000  # MB

@@ -33,6 +33,7 @@ Environment variables: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KE
 8. **Revision** (conditional) — if AutoCritique verdict is "Revise and Resubmit", a CLI agent subprocess addresses each recommendation one at a time, performing new/revised analyses
 9. **Report Revision** (conditional) — after all per-recommendation revisions complete, a CLI agent subprocess reads the original report, review, responses, and revised analyses, then produces a revised report incorporating all changes
 10. **Repo Assembly** — CLI agent subprocess assembles finalized files (most current report, scripts, data, results, visualizations) into a clean `repo/` directory with a README
+11. **Notebook Generation** — CLI agent subprocess reads the finalized `repo/` directory and creates a self-contained, executable Jupyter notebook that reproduces all analyses and visualizations
 
 ### Literature Search Question Generation
 
@@ -305,6 +306,35 @@ repo:
 
 Agent logic lives in `repo/agent_repo.py`. Prompt template in `prompts/agent_repo.yaml`.
 
+### Notebook Agent Mode (`notebook/agent_notebook.py`)
+
+After repo assembly, a Notebook Agent creates a self-contained, executable Jupyter notebook from the finalized `repo/` directory. The agent reads scripts, the report, and data files, then produces a tutorial-style notebook that reproduces the study's analyses and visualizations. The agent validates the notebook by executing it with `jupyter execute` or `nbconvert` and fixes any failures.
+
+The notebook agent's cwd is `repo/` (not the project root), so the agent sees the clean finalized structure directly.
+
+**Output:**
+```
+repo/notebooks/
+  <descriptive_name>.ipynb   # Self-contained executable notebook
+```
+
+**Skip rules:**
+- `notebook.enabled: false` → step skipped
+- `notebook.use_agent: false` → step skipped
+- Provider not `anthropic`/`openai` → step skipped
+- CLI binary not found → step skipped
+- Repo step did not produce output → step skipped
+
+Config fields:
+```yaml
+notebook:
+  enabled: true         # default true; false = skip notebook generation
+  use_agent: true       # must be true (no legacy fallback)
+  agent_timeout: 900    # agent-thinking timeout in seconds (child process time excluded)
+```
+
+Agent logic lives in `notebook/agent_notebook.py`. Prompt template in `prompts/agent_notebook.yaml`.
+
 ### Prompt Testing Harness (`test_prompt.py`)
 
 `test_prompt.py` replays individual agent stages against completed project runs so prompts can be iterated in minutes instead of the ~2-hour full pipeline. It creates lightweight test run directories using symlinks to the source project's input directories, with only the output directory as a real (empty) directory.
@@ -316,10 +346,11 @@ Agent logic lives in `repo/agent_repo.py`. Prompt template in `prompts/agent_rep
 | `questions` | `questions/agent_questions.py` | `questions/` | `literature/` (optional) |
 | `viz` | `visualization/agent_visualization.py` | `visualizations/` | `analysis/`, `questions/` |
 | `report` | `reporting/agent_report.py` | `reports/` | `analysis/`, `visualizations/`, `questions/` |
+| `notebook` | `notebook/agent_notebook.py` | `repo/notebooks/` | `repo/` subdirs (symlinked individually) |
 
 **CLI arguments:**
 ```
-positional:  stage              {questions, viz, report}
+positional:  stage              {questions, viz, report, notebook}
 required:    --project PATH     completed project dir (absolute or name under projects/)
 optional:    --prompt PATH      YAML or plain text prompt override
              --label NAME       label for this run (default: timestamp)
@@ -378,6 +409,7 @@ Milestone patterns per call site:
 - **Revision agent** — watches `autocritique/round_{k}/` for `Reviewer_{i}_log.md`, `Response_{i}.md`
 - **Report revision agent** — watches `reports/` for `Report_revision_{k}.log`, `*_revision_{k}.md`
 - **Repo agent** — watches `repo/` for `README.md`, `paper/*.md`, `scripts/*.py`, `paper/*.png`/`*.svg`
+- **Notebook agent** — watches `repo/` for `notebooks/*.ipynb`, `notebooks/*.py`
 
 ### Pipeline UI (`core/pipeline_ui.py` + `core/dashboard_template.py`)
 
@@ -445,6 +477,7 @@ At startup, "Options" appears as choice `[5]` in the provider/model selection me
 | 12 | Interactive mode (feedback loops) | `interactive_mode` | bool |
 | 13 | AutoCritique (peer review) | `autocritique.enabled` | bool |
 | 14 | Max revision rounds | `autocritique.max_revision_rounds` | int |
+| 15 | Notebook generation | `notebook.enabled` | bool |
 
 After editing, the user chooses "Just this time" (in-memory only) or "Make default" (persisted to `.user_options.json`). Saved defaults are loaded automatically on future runs via `load_user_options()`, which runs right after `initialize_framework()`. Only keys present in `OPTIONS_SETTINGS` are applied; stale keys in the JSON file are ignored.
 
@@ -498,6 +531,8 @@ Key functions (all in `main.py`): `MODEL_MAPPINGS`, `MANUAL_CONFIG_AGENTS`, `_bu
 | `prompts/agent_report_revision.yaml` | Prompt template for report revision agent |
 | `repo/agent_repo.py` | CLI agent repo assembly: finalized files into clean repo structure |
 | `prompts/agent_repo.yaml` | Prompt template for repo agent |
+| `notebook/agent_notebook.py` | CLI agent notebook generation: creates Jupyter notebook from repo |
+| `prompts/agent_notebook.yaml` | Prompt template for notebook agent |
 | `arxiv_interp_graph/enrich_arxiv_ids.py` | Batch-enrich graph with arxiv_id + open_access_url |
 | `.last_llm.json` | Persisted provider/model selection from last run |
 | `.user_options.json` | Persisted user option overrides (gitignored) |

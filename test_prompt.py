@@ -20,6 +20,9 @@ Usage:
 
     # Report with different model
     python test_prompt.py report --project <completed_run> --provider anthropic --model claude-opus-4-6
+
+    # Notebook generation from finalized repo
+    python test_prompt.py notebook --project <completed_run>
 """
 
 import argparse
@@ -55,6 +58,12 @@ from AutoInterp.reporting.agent_report import (
     run_report_agent,
     read_report_outputs,
 )
+from AutoInterp.notebook.agent_notebook import (
+    load_notebook_prompt_template,
+    _build_notebook_prompt,
+    run_notebook_agent,
+    read_notebook_outputs,
+)
 
 PACKAGE_ROOT = Path(__file__).resolve().parent
 PROJECTS_DIR = PACKAGE_ROOT / "projects"
@@ -78,6 +87,12 @@ STAGE_DEFS = {
         "output_dirs": ["reports"],
         "required_inputs": ["analysis", "visualizations"],
         "optional_inputs": ["questions"],
+        "default_timeout": 900,
+    },
+    "notebook": {
+        "output_dirs": ["repo/notebooks"],
+        "required_inputs": ["repo"],
+        "optional_inputs": ["analysis", "visualizations", "reports"],
         "default_timeout": 900,
     },
 }
@@ -153,6 +168,8 @@ def load_prompt_template(stage: str, prompt_path: Optional[str]) -> str:
         return load_visualization_prompt_template()
     elif stage == "report":
         return load_report_prompt_template()
+    elif stage == "notebook":
+        return load_notebook_prompt_template()
     else:
         raise ValueError(f"Unknown stage: {stage}")
 
@@ -175,7 +192,13 @@ def resolve_project(project_arg: str) -> Path:
 
 
 def create_test_run_dir(stage: str, label: str, source_project: Path) -> Path:
-    """Create the test run directory with symlinks for inputs and real output dirs."""
+    """Create the test run directory with symlinks for inputs and real output dirs.
+
+    For the ``notebook`` stage, ``repo/`` is handled specially: individual
+    subdirs (paper/, scripts/, data/, results/, README.md) are symlinked
+    inside a real ``repo/`` directory, while ``repo/notebooks/`` is created
+    as a real directory so the agent can write there.
+    """
     stage_def = STAGE_DEFS[stage]
     run_dir = TEST_RUNS_DIR / stage / label
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -187,20 +210,53 @@ def create_test_run_dir(stage: str, label: str, source_project: Path) -> Path:
             print(f"Error: Required input '{inp}' not found in project: {source_project}")
             sys.exit(1)
 
-    # Create symlinks for inputs
-    for inp in stage_def["required_inputs"] + stage_def["optional_inputs"]:
-        src = source_project / inp
-        link = run_dir / inp
-        if link.exists() or link.is_symlink():
-            continue  # Don't overwrite existing links
-        if src.exists():
-            link.symlink_to(src.resolve())
+    if stage == "notebook":
+        # Special handling: symlink individual repo/ contents, create real notebooks/
+        _setup_notebook_test_dir(run_dir, source_project)
+    else:
+        # Create symlinks for inputs
+        for inp in stage_def["required_inputs"] + stage_def["optional_inputs"]:
+            src = source_project / inp
+            link = run_dir / inp
+            if link.exists() or link.is_symlink():
+                continue  # Don't overwrite existing links
+            if src.exists():
+                link.symlink_to(src.resolve())
 
     # Create real output directories
     for out in stage_def["output_dirs"]:
         (run_dir / out).mkdir(parents=True, exist_ok=True)
 
     return run_dir
+
+
+def _setup_notebook_test_dir(run_dir: Path, source_project: Path) -> None:
+    """Set up the notebook test directory with repo/ subdirs as symlinks.
+
+    Symlinks each child of source_project/repo/ (except notebooks/) into
+    run_dir/repo/, so the agent can read them. ``repo/notebooks/`` is
+    created as a real writable directory.
+    """
+    repo_src = source_project / "repo"
+    repo_dst = run_dir / "repo"
+    repo_dst.mkdir(parents=True, exist_ok=True)
+
+    for child in sorted(repo_src.iterdir()):
+        if child.name == "notebooks":
+            continue  # will be a real dir (output)
+        link = repo_dst / child.name
+        if link.exists() or link.is_symlink():
+            continue
+        link.symlink_to(child.resolve())
+
+    # Also symlink optional top-level inputs (analysis, visualizations, reports)
+    for inp in STAGE_DEFS["notebook"]["optional_inputs"]:
+        src = source_project / inp
+        link = run_dir / inp
+        if link.exists() or link.is_symlink():
+            continue
+        if src.exists():
+            link.symlink_to(src.resolve())
 
 
 def build_prompt(
@@ -217,6 +273,8 @@ def build_prompt(
         return _build_visualization_prompt(template, analysis_root)
     elif stage == "report":
         return _build_report_prompt(template)
+    elif stage == "notebook":
+        return _build_notebook_prompt(template, run_dir)
     else:
         raise ValueError(f"Unknown stage: {stage}")
 
@@ -249,6 +307,14 @@ def run_stage(
         )
     elif stage == "report":
         return run_report_agent(
+            provider=provider,
+            project_dir=run_dir,
+            prompt_text=prompt_text,
+            timeout=timeout,
+            model=model,
+        )
+    elif stage == "notebook":
+        return run_notebook_agent(
             provider=provider,
             project_dir=run_dir,
             prompt_text=prompt_text,
@@ -297,6 +363,17 @@ def print_summary(stage: str, run_dir: Path, result: Dict[str, Any]) -> None:
         if outputs["all_files"]:
             print(f"  All files: {', '.join(Path(f).name for f in outputs['all_files'])}")
 
+    elif stage == "notebook":
+        outputs = read_notebook_outputs(run_dir)
+        if outputs["notebook_path"]:
+            nb_path = Path(outputs["notebook_path"])
+            size = nb_path.stat().st_size
+            print(f"\n  Notebook: {nb_path.name} ({size:,} bytes)")
+        else:
+            print("\n  (no notebook generated)")
+        if outputs["all_files"]:
+            print(f"  All notebooks: {', '.join(Path(f).name for f in outputs['all_files'])}")
+
     print(f"\n  Output dir: {run_dir}")
     print()
 
@@ -311,11 +388,12 @@ Examples:
   %(prog)s viz --project linear_representation_limits_diagnostic_2026-03-12T18-14-54 --label "test-v2"
   %(prog)s questions --project <name> --task-description "How do attention heads specialize?"
   %(prog)s report --project <name> --prompt my_report_v2.yaml
+  %(prog)s notebook --project <name>
 """,
     )
     parser.add_argument(
         "stage",
-        choices=["questions", "viz", "report"],
+        choices=["questions", "viz", "report", "notebook"],
         help="Which agent stage to run",
     )
     parser.add_argument(
@@ -403,7 +481,14 @@ def main() -> None:
             if child.is_symlink():
                 print(f"    {child.name} -> {child.resolve()}")
             elif child.is_dir():
+                # Show repo/ contents for notebook stage
                 print(f"    {child.name}/ (real dir)")
+                if stage == "notebook" and child.name == "repo":
+                    for repo_child in sorted(child.iterdir()):
+                        if repo_child.is_symlink():
+                            print(f"      {repo_child.name} -> {repo_child.resolve()}")
+                        elif repo_child.is_dir():
+                            print(f"      {repo_child.name}/ (real dir)")
         print("=" * 60)
         return
 

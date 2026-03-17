@@ -104,6 +104,7 @@ AGENT_DISPLAY_NAMES = {
     "revision_agent": "Revision Agent",
     "report_revision_agent": "Report Revision Agent",
     "repo_agent": "Repo Agent",
+    "notebook_agent": "Notebook Agent",
     "questions_agent": "Questions Agent (Generate + Prioritize)",
 }
 
@@ -132,6 +133,7 @@ AGENT_STEP_MAP = {
     "revision_agent": "revision",
     "report_revision_agent": "report_revision",
     "repo_agent": "repo",
+    "notebook_agent": "notebook",
     "questions_agent": "question_generation",
 }
 
@@ -156,6 +158,7 @@ PIPELINE_STEPS = [
     ("revision", "Revision"),
     ("report_revision", "Report Revision"),
     ("repo", "Repo Assembly"),
+    ("notebook", "Notebook Generation"),
 ]
 
 

@@ -15,7 +15,7 @@ prompt_template: |
 
   4. Note any visualizations that appear in the final report markdown file. Then go to ./visualizations/ directory and copy those to the repo/paper/ subdirectory. Rename them to give them clean, succinct names, then edit the markdown file so they reference the new name and relative location as the report (they should be in the same directory now).
 
-  5. If there is a ./notebooks/ subdirectory in the project, copy the jupyter notebook to the repo/notebooks/ subdirectory.
+  5. For each visualization that appears in the final report markdown file, find the script that generates that visualization in the ./visualizations/ directory and copy those to the repo/scripts/ subdirectory. As with the other analysis scripts, make sure you are working off the most current scripts that produce the final figures. After copying the scripts to ./repo/scripts/, rename the files to give them clean, succinct names. Update any infile and outfile names relative directory locations to correspond to the new repo locations and names.
 
   6. Compact your context if necessary.
 

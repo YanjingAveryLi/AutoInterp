@@ -85,6 +85,12 @@ from AutoInterp.repo.agent_repo import (
     run_repo_agent,
     read_repo_outputs,
 )
+from AutoInterp.notebook.agent_notebook import (
+    load_notebook_prompt_template,
+    _build_notebook_prompt,
+    run_notebook_agent,
+    read_notebook_outputs,
+)
 from AutoInterp.questions.agent_questions import (
     load_questions_prompt_template,
     _build_questions_prompt,
@@ -258,6 +264,7 @@ OPTIONS_SETTINGS = [
     {"key": "interactive_mode",              "label": "Interactive mode (feedback loops)", "type": "bool", "help": "Pause after each stage for user review and revision"},
     {"key": "autocritique.enabled",          "label": "AutoCritique (peer review)",         "type": "bool", "help": "Run automated peer review after report generation"},
     {"key": "autocritique.max_revision_rounds", "label": "Max revision rounds",              "type": "int",  "help": "Max autocritique→revision cycles (0 = review only, no revisions)"},
+    {"key": "notebook.enabled",               "label": "Notebook generation",               "type": "bool", "help": "Generate Jupyter notebook from finalized repo"},
 ]
 
 
@@ -3891,6 +3898,87 @@ async def streamlined_pipeline(framework: Dict[str, Any]) -> Dict[str, Any]:
             if pipeline_ui:
                 pipeline_ui.step_skipped("repo", reason="disabled")
 
+        # ------------------------------------------------------------------
+        # Notebook Generation — create Jupyter notebook from finalized repo
+        # ------------------------------------------------------------------
+        _nb_cfg = config.get("notebook", {})
+        _nb_enabled = _nb_cfg.get("enabled", True)
+        _nb_use_agent = _nb_cfg.get("use_agent", True)
+        _nb_path = None
+
+        _nb_provider = _repo_provider  # reuse same provider as repo step
+
+        if _nb_enabled and _nb_use_agent and _repo_dir_path:
+            import shutil as _shutil_nb
+            _nb_cli_name = "claude" if _nb_provider == "anthropic" else "codex"
+            _nb_agent_available = (
+                _nb_provider in ("anthropic", "openai")
+                and _shutil_nb.which(_nb_cli_name) is not None
+            )
+
+            if _nb_agent_available:
+                print("[AUTOINTERP] PHASE 9: Notebook Generation — creating Jupyter notebook from repo")
+                logger.info("Starting notebook generation (provider=%s)", _nb_provider)
+                if pipeline_ui:
+                    pipeline_ui.step_start("notebook")
+
+                try:
+                    _nb_template = load_notebook_prompt_template()
+                    _nb_prompt_text = _build_notebook_prompt(_nb_template, path_resolver.get_project_dir())
+                    _nb_timeout = _nb_cfg.get("agent_timeout", 900)
+
+                    _nb_progress_cb = None
+                    if pipeline_ui:
+                        def _nb_progress_cb(msg):
+                            pipeline_ui.step_progress("notebook", msg)
+
+                    _nb_result = run_notebook_agent(
+                        provider=_nb_provider,
+                        project_dir=path_resolver.get_project_dir(),
+                        prompt_text=_nb_prompt_text,
+                        timeout=_nb_timeout,
+                        on_progress=_nb_progress_cb,
+                        model=config.get("llm", {}).get("model", ""),
+                    )
+
+                    _nb_outputs = read_notebook_outputs(path_resolver.get_project_dir())
+                    _nb_path = _nb_outputs.get("notebook_path")
+
+                    if _nb_path:
+                        logger.info("Notebook created at %s", _nb_path)
+                        print(f"[AUTOINTERP] Notebook created: {_nb_path}")
+                        if pipeline_ui:
+                            pipeline_ui.step_complete("notebook", summary=Path(_nb_path).name)
+                    else:
+                        logger.warning("Notebook agent finished but no .ipynb found")
+                        print("[AUTOINTERP] Notebook agent did not produce an .ipynb file")
+                        if pipeline_ui:
+                            pipeline_ui.step_failed("notebook", error="No .ipynb produced")
+
+                except Exception as _nb_exc:
+                    logger.error("Notebook generation failed: %s", _nb_exc)
+                    print(f"[AUTOINTERP] Notebook generation failed: {_nb_exc}")
+                    if pipeline_ui:
+                        pipeline_ui.step_failed("notebook", error=str(_nb_exc))
+            else:
+                if _nb_provider in ("anthropic", "openai"):
+                    print(f"[AUTOINTERP] Notebook generation: '{_nb_cli_name}' CLI not found; skipping")
+                else:
+                    print(f"[AUTOINTERP] Notebook generation: provider '{_nb_provider}' not supported; skipping")
+                if pipeline_ui:
+                    pipeline_ui.step_skipped("notebook", reason=f"CLI not available for {_nb_provider}")
+        elif _nb_enabled and _nb_use_agent and not _repo_dir_path:
+            print("[AUTOINTERP] Notebook generation: skipping (repo step did not produce output)")
+            if pipeline_ui:
+                pipeline_ui.step_skipped("notebook", reason="repo not available")
+        elif _nb_enabled and not _nb_use_agent:
+            print("[AUTOINTERP] Notebook generation: agent mode disabled; skipping")
+            if pipeline_ui:
+                pipeline_ui.step_skipped("notebook", reason="agent mode disabled")
+        else:
+            if pipeline_ui:
+                pipeline_ui.step_skipped("notebook", reason="disabled")
+
         # Print task completion message
         result = {
             "status": "completed",
@@ -3902,6 +3990,7 @@ async def streamlined_pipeline(framework: Dict[str, Any]) -> Dict[str, Any]:
             "revision_rounds_completed": _ac_final_round,
             "revision_responses": [r.get("response_path") for r in _all_rev_responses if r.get("response_path")],
             "repo_dir": _repo_dir_path,
+            "notebook_path": _nb_path,
             "conclusion": report_result.get("conclusion"),
             "final_confidence": report_result.get("final_confidence")
         }
