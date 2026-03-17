@@ -18,7 +18,7 @@ venv/
 hf_models/
 
 # Semantic Scholar API response cache
-arxiv_interp_graph/.cache/
+citation_graph/.cache/
 
 # Package metadata
 *.egg-info/
@@ -36,6 +36,9 @@ logs/
 .user_options.json
 .user_manual_models.json
 .last_llm.json
+
+# Persona prompts (user-customized; empty templates committed for reference)
+persona_prompts/
 
 # Helper script to be deleted
 rebuild_notebook_from_data.py
