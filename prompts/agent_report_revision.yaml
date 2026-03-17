@@ -21,6 +21,8 @@ prompt_template: |
 
   6. Look at the ./visualizations/ directory. Note the most current visualizations.
 
+  Not all the analyses or all figures need to **necessarily** be included in the final report. Include those that are relevant and make a coherent and convincing case for the central research claim. Additionally, figures of analyses could be included in a different order if this would clarify the argument. But if you do change the order, make sure their numbering in the report reflect their order of appearance in the report. That is, Figure 1 is first, followed by Figure 2, etc.
+
   7. With this holistic view of the revised version of the study, create your revised report. Begin by copying the report and adding _revision_{k}.md as a suffix to the file name. Do not edit the original report, only edit your new copy. Make the changes necessary to reflect the revised analyses. Do not mention the revision process in your writing! This is like peer review, the revised manuscript does not discuss the review process. Be sure to incorporate textual edits that were recommended. For example, if one of the Reviewer's recommendations was about terminology or tone, it is up to you to make sure that suggestion is incorporated.
 
   8. Keep working on the report until it fully reflects the most current analyses and figures. Feel free to reference files in ./analysis/ or ./visualizations/ if you need to refresh your memory.

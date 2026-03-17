@@ -14,6 +14,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set
 
+import psutil
+
 logger = logging.getLogger(__name__)
 
 POLL_INTERVAL = 3.0  # seconds between filesystem polls
@@ -54,6 +56,16 @@ def _fmt_elapsed(seconds: float) -> str:
     return f"{hours}h {mins:02d}m"
 
 
+def _has_active_children(pid: int) -> bool:
+    """Return True if the process *pid* has any running child processes."""
+    try:
+        parent = psutil.Process(pid)
+        children = parent.children(recursive=True)
+        return any(c.is_running() for c in children)
+    except (psutil.NoSuchProcess, psutil.AccessDenied):
+        return False
+
+
 def run_agent_with_polling(
     cmd: List[str],
     cwd: Path,
@@ -71,7 +83,9 @@ def run_agent_with_polling(
     cwd : Path
         Working directory for the subprocess.
     timeout : int
-        Maximum wall-clock seconds before the process is killed.
+        Maximum *agent-thinking* seconds before the process is killed.
+        Time spent waiting on child processes (scripts, python, bash, etc.)
+        is excluded from this budget.
     milestone : MilestoneSpec, optional
         Filesystem patterns to watch for progress updates.
     on_progress : callable, optional
@@ -104,33 +118,57 @@ def run_agent_with_polling(
         return {"success": False, "stdout": "", "stderr": str(exc), "returncode": -1}
 
     start_time = time.monotonic()
+    last_poll_time = start_time
     last_event_time = start_time  # tracks last milestone, file event, or heartbeat
+    agent_thinking_time = 0.0  # accumulates only when no child processes are running
 
     # Poll loop: wait for process to finish while checking milestones
     while True:
-        elapsed = time.monotonic() - start_time
+        now = time.monotonic()
+        elapsed = now - start_time  # wall-clock (for display / heartbeat)
+        delta = now - last_poll_time
 
-        # Check overall timeout
-        if elapsed >= timeout:
-            logger.warning("Agent timed out after %ds, killing process.", timeout)
+        # Accumulate agent-only thinking time (exclude child-process wait)
+        has_children = _has_active_children(proc.pid)
+        if not has_children:
+            agent_thinking_time += delta
+        last_poll_time = now
+
+        # Check agent-thinking timeout
+        if agent_thinking_time >= timeout:
+            wall = time.monotonic() - start_time
+            logger.warning(
+                "Agent thinking time exceeded %ds (wall clock: %s), killing process.",
+                timeout, _fmt_elapsed(wall),
+            )
+            # Kill child processes first, then the agent
+            try:
+                parent = psutil.Process(proc.pid)
+                for child in parent.children(recursive=True):
+                    child.kill()
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                pass
             proc.kill()
             try:
                 stdout, stderr = proc.communicate(timeout=5)
             except Exception:
                 stdout, stderr = "", ""
+            msg = (
+                f"Agent thinking time exceeded {timeout}s "
+                f"(wall clock: {_fmt_elapsed(wall)})"
+            )
             if on_progress:
-                on_progress(f"Timed out after {timeout}s")
+                on_progress(msg)
             return {
                 "success": False,
                 "stdout": stdout or "",
-                "stderr": stderr or f"Timed out after {timeout}s",
+                "stderr": stderr or msg,
                 "returncode": -9,
             }
 
         # Wait a polling interval for the process to finish
-        remaining = min(POLL_INTERVAL, timeout - elapsed)
         try:
-            stdout, stderr = proc.communicate(timeout=remaining)
+            stdout, stderr = proc.communicate(timeout=POLL_INTERVAL)
             # Process finished
             total = time.monotonic() - start_time
             if on_progress:

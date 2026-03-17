@@ -25,7 +25,7 @@ Environment variables: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KE
 
 1. **Literature Search** (optional) — sample 3 papers from citation graph, download articles (PDF or HTML) to `literature/`, generate research questions
 2. **Question Generation** — LLM writes candidate research questions (skipped if literature search produced questions)
-3. **Question Prioritization** — LLM selects best question, extracts TITLE, renames project dir (always runs)
+3. **Question Prioritization** — agent mode (default): CLI agent subprocess selects best question; legacy mode: LLM API call selects best question; extracts TITLE, renames project dir (always runs)
 4. **Iterative Analysis** — agent mode (default): CLI agent subprocess plans, codes, executes, debugs, evaluates autonomously; legacy mode: plan → generate code → execute in sandbox → evaluate → repeat until confident
 5. **Visualization** — agent mode (default): CLI agent subprocess reads all analyses and generates publication-quality figures autonomously; legacy mode: per-analysis planner → generator → executor → evaluator pipeline
 6. **Report Generation** — agent mode (default): CLI agent subprocess reads all analyses and visualizations, writes an academic-style report autonomously; legacy mode: LLM API calls generate each report section
@@ -75,11 +75,25 @@ For OpenAI, the `codex` CLI must be installed and authenticated separately.
 
 Config fields:
 - `literature_search.use_agent` (default `true`) — use CLI agent; `false` = always use LLM API
-- `literature_search.agent_timeout` (default `600`) — subprocess timeout in seconds
+- `literature_search.agent_timeout` (default `600`) — agent-thinking timeout in seconds (child process execution time excluded)
 
 Agent logic lives in `arxiv_interp_graph/literature_search/agent_questions.py`.
 
 **Smoke-tested:** The agent subprocess path (Anthropic/`claude`) has been verified end-to-end — prompt substitution, subprocess invocation, PDF reading by the agent, `Research_Questions.txt` creation, and content retrieval all work. The full pipeline path requires `arxiv_interp_graph/output/graph_state.json` to exist (build it with `python arxiv_interp_graph/cli.py build`).
+
+### Question Prioritizer Agent Mode (`questions/agent_prioritizer.py`)
+
+When `questions.use_agent: true` (default) and the provider is `anthropic` or `openai`, question prioritization is handled by a CLI agent subprocess instead of a direct LLM API call. The agent reads `questions/questions.txt`, selects the best question, and writes `questions/prioritized_question.txt` with the 4-field format (Question, RATIONALE, PROCEDURE, TITLE).
+
+**Fallback rules:**
+- `questions.use_agent: false` → always use LLM API call
+- Provider not `anthropic`/`openai` → LLM API call
+- CLI binary not found → LLM API call with warning
+- Agent fails → LLM API call with warning
+
+The `questions.use_agent` and `questions.agent_timeout` config keys are shared with question generation (no new config needed).
+
+Agent logic lives in `questions/agent_prioritizer.py`. Prompt template in `prompts/agent_prioritizer.yaml`.
 
 ### Analysis Agent Mode (`analysis/agent_analysis.py`)
 
@@ -128,7 +142,7 @@ Config fields:
 ```yaml
 analysis:
   use_agent: true       # default true; false = legacy pipeline
-  agent_timeout: 1800   # per-iteration subprocess timeout (seconds)
+  agent_timeout: 1800   # per-iteration agent-thinking timeout in seconds (child process time excluded)
 ```
 
 Agent logic lives in `analysis/agent_analysis.py`. Prompt template in `prompts/agent_analysis.yaml`.
@@ -160,7 +174,7 @@ Config fields:
 ```yaml
 visualization:
   use_agent: true       # default true; false = legacy pipeline
-  agent_timeout: 900    # subprocess timeout (seconds)
+  agent_timeout: 900    # agent-thinking timeout in seconds (child process time excluded)
 ```
 
 Agent logic lives in `visualization/agent_visualization.py`. Prompt template in `prompts/agent_visualization.yaml`.
@@ -179,7 +193,7 @@ Config fields:
 ```yaml
 reporting:
   use_agent: true       # default true; false = legacy pipeline
-  agent_timeout: 900    # subprocess timeout (seconds)
+  agent_timeout: 900    # agent-thinking timeout in seconds (child process time excluded)
 ```
 
 Agent logic lives in `reporting/agent_report.py`. Prompt template in `prompts/agent_report.yaml`.
@@ -209,9 +223,9 @@ Config fields:
 autocritique:
   enabled: true              # default true; false = skip autocritique
   use_agent: true            # must be true (no legacy fallback)
-  agent_timeout: 600         # subprocess timeout (seconds)
-  revision_timeout: 1800     # per-recommendation timeout for revision agent
-  report_revision_timeout: 900  # timeout for report revision agent
+  agent_timeout: 600         # agent-thinking timeout in seconds (child process time excluded)
+  revision_timeout: 1800     # per-recommendation agent-thinking timeout (child process time excluded)
+  report_revision_timeout: 900  # report revision agent-thinking timeout (child process time excluded)
   max_revision_rounds: 2     # max autocritique→revision→report revision cycles (0 = review only)
 ```
 
@@ -286,7 +300,7 @@ Config fields:
 repo:
   enabled: true         # default true; false = skip repo assembly
   use_agent: true       # must be true (no legacy fallback)
-  agent_timeout: 900    # subprocess timeout (seconds)
+  agent_timeout: 900    # agent-thinking timeout in seconds (child process time excluded)
 ```
 
 Agent logic lives in `repo/agent_repo.py`. Prompt template in `prompts/agent_repo.yaml`.
@@ -349,10 +363,10 @@ CLI agent subprocesses (question generation, analysis, report, autocritique) use
 - Watches the agent's working directory for milestone files via `MilestoneSpec` / `MilestonePattern`
 - Calls an `on_progress` callback for each new file detected (e.g. "Wrote analysis plan", "Wrote script: foo.py", "Generated figure: plot.png")
 - **Broad file scanning**: Detects *any* new file in the watch directory, not just milestone-pattern matches. Files matching a milestone pattern get a descriptive message; other files are reported as "New file: {name}"
-- **Heartbeat**: Emits "Still running... Xm Ys elapsed" every 30 seconds (`HEARTBEAT_INTERVAL = 30.0`) when no milestones or new files have been detected, so the user always sees activity
+- **Heartbeat**: Emits "Still running... Xm Ys elapsed" every 2 minutes (`HEARTBEAT_INTERVAL = 120.0`) when no milestones or new files have been detected, so the user always sees activity
 - **Completion signal**: Emits "Agent finished (Xm Ys)" when the subprocess exits
 - Progress messages flow to both the CLI terminal (`[~]` prefix) and the HTML dashboard (timestamped log)
-- Timeout enforcement: kills the process if wall-clock time exceeds the configured limit
+- **Agent-only timeout**: The timeout budget counts only *agent thinking time* — time when the agent has no active child processes. When the agent launches a script (python, bash, etc.), `psutil` detects the child process and pauses the timeout clock. This prevents long-running but legitimate script executions from triggering a timeout. Heartbeat and progress messages continue to show wall-clock elapsed time. On timeout, the message reads "Agent thinking time exceeded {N}s (wall clock: {wall}s)" and all descendant processes are killed via `psutil`
 - Backward compatible: `on_progress=None` and `milestone=None` are valid (no polling, just Popen + wait)
 
 Milestone patterns per call site:
@@ -468,6 +482,8 @@ Key functions (all in `main.py`): `MODEL_MAPPINGS`, `MANUAL_CONFIG_AGENTS`, `_bu
 | `arxiv_interp_graph/literature_search/run.py` | Literature search orchestration + LLM fallback |
 | `arxiv_interp_graph/literature_search/download.py` | Article download (PDF + HTML) + manifest writing |
 | `prompts/question_manager.yaml` | All question prompts (generator, prioritizer, agent question generator) |
+| `questions/agent_prioritizer.py` | CLI agent question prioritization: subprocess, output reading |
+| `prompts/agent_prioritizer.yaml` | Prompt template for prioritizer agent |
 | `analysis/agent_analysis.py` | CLI agent analysis: workspace setup, subprocess, output reading |
 | `prompts/agent_analysis.yaml` | Prompt template for analysis agent iterations |
 | `visualization/agent_visualization.py` | CLI agent visualization: subprocess, output reading |

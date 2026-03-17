@@ -122,7 +122,7 @@ curl -fsSL https://claude.ai/install.sh | bash   # install
 claude                                             # first run: follow login prompts
 ```
 
-The generated questions are written to `questions/questions.txt` and then passed through the normal question prioritizer, which selects the best question and extracts a project title.
+The generated questions are written to `questions/questions.txt` and then passed through the question prioritizer (also agent-backed by default), which selects the best question and extracts a project title. If the agent is unavailable, the system falls back to an LLM API call.
 
 Key outputs:
 - `projects/<project_id>/literature/manifest.json` (paper metadata)
@@ -242,6 +242,8 @@ The script creates lightweight test run directories under `test_runs/` using sym
 │
 ├── questions/
 │   ├── __init__.py             # Module initialization
+│   ├── agent_questions.py      # CLI agent question generation: subprocess, output reading
+│   ├── agent_prioritizer.py    # CLI agent question prioritization: subprocess, output reading
 │   └── question_manager.py     # Manages research questions
 │
 ├── prompts/
@@ -249,6 +251,7 @@ The script creates lightweight test run directories under `test_runs/` using sym
 │   ├── interactive.yaml        # Revision prompts for interactive mode feedback loops
 │   ├── agent_analysis.yaml     # Prompt template for analysis CLI agent
 │   ├── agent_autocritique.yaml  # Prompt template for autocritique CLI agent
+│   ├── agent_prioritizer.yaml  # Prompt template for prioritizer CLI agent
 │   ├── agent_report.yaml       # Prompt template for report CLI agent
 │   ├── agent_visualization.yaml # Prompt template for visualization CLI agent
 │   ├── analysis_generator.yaml # Analysis Generator Prompts
@@ -355,7 +358,8 @@ During each run, AutoInterp writes a self-contained `dashboard.html` file to the
 
 - **Per-step tabs** — Questions, Prioritize, Analysis, Visualization, Report, AutoCritique — each showing all LLM prompts and responses for that stage
 - **Real-time progress** — All CLI agent subprocesses (question generation, analysis, visualization, report, autocritique) emit progress updates via filesystem polling every 3 seconds. Named milestone files (plans, scripts, figures, evaluations) get descriptive messages; any other new file the agent creates is also reported. Progress appears as `[~]` lines in the terminal and as a timestamped log in the dashboard
-- **Heartbeat** — When no new files are detected for 30 seconds, a "Still running... Xm Ys elapsed" message is emitted so the user always sees activity during long-running agents. An "Agent finished (Xm Ys)" message is emitted when the subprocess exits
+- **Heartbeat** — When no new files are detected for 2 minutes, a "Still running... Xm Ys elapsed" message is emitted so the user always sees activity during long-running agents. An "Agent finished (Xm Ys)" message is emitted when the subprocess exits
+- **Agent-only timeout** — Timeout budgets count only agent thinking time, not time spent waiting on child processes (e.g., running a Python analysis script). This uses `psutil` to detect active child processes and pause the timeout clock, so long-running but legitimate script executions won't trigger a premature timeout
 - **Auto-refresh** — the page polls for updates during the run and preserves your tab state, scroll position, and expanded/collapsed sections
 - **Analysis grouping** — iterative analysis calls are grouped by iteration and attempt, with a color gradient from gold to burnt umber
 - **Collapsible sections** — system prompts, user prompts, and assistant responses are each collapsible (all collapsed by default)

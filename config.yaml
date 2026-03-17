@@ -33,12 +33,13 @@ literature_search:
   seed_id: null
   seed: null   # null = different papers each run; set e.g. 42 for reproducibility
   use_agent: true       # use CLI agent (claude/codex) for question generation; false = LLM API call
-  agent_timeout: 1800   # seconds to wait for agent CLI subprocess
+  agent_timeout: 4200   # seconds to wait for agent CLI subprocess
 
 # Question generation + prioritization settings
 questions:
   use_agent: true       # Use CLI agent (claude/codex) for question gen+prioritize; false = API calls
-  agent_timeout: 300    # Subprocess timeout in seconds
+                        # Applies to both question generation and standalone prioritization
+  agent_timeout: 4200   # Subprocess timeout in seconds (shared by gen and prioritize agents)
 
 # Model to analyze
 model:
@@ -52,7 +53,7 @@ model:
 # Analysis settings
 analysis:
   use_agent: true            # Use CLI agent (claude/codex) for analysis; false = legacy pipeline
-  agent_timeout: 1800        # Per-iteration timeout in seconds for agent subprocess
+  agent_timeout: 4200        # Per-iteration timeout in seconds for agent subprocess
   execution:
     timeout: 180  # seconds
     max_memory: 4000  # MB
@@ -84,7 +85,7 @@ execution:
 # Visualization settings
 visualization:
   use_agent: true             # Use CLI agent (claude/codex) for visualization; false = legacy pipeline
-  agent_timeout: 1800         # Subprocess timeout in seconds for visualization agent
+  agent_timeout: 4200         # Subprocess timeout in seconds for visualization agent
   default_format: "png"
   dpi: 300
   save_dir: "projects/{project_id}/visualizations"
@@ -98,22 +99,22 @@ reporting:
   default_format: "markdown"  # Options: markdown, jupyter, html, pdf
   save_dir: "projects/{project_id}/reports"
   use_agent: true             # Use CLI agent (claude/codex) for report generation; false = legacy pipeline
-  agent_timeout: 1800         # Subprocess timeout in seconds for agent report generation
+  agent_timeout: 4200         # Subprocess timeout in seconds for agent report generation
 
 # AutoCritique settings — automated peer review after report generation
 autocritique:
   enabled: true               # Run automated peer review after report generation
   use_agent: true             # Use CLI agent (claude/codex) for autocritique
-  agent_timeout: 1800         # Subprocess timeout in seconds for autocritique agent
-  revision_timeout: 1800      # Per-recommendation timeout for revision agent (does analysis work)
-  report_revision_timeout: 1800  # Timeout for report revision agent (incorporates revisions into report)
+  agent_timeout: 4200         # Subprocess timeout in seconds for autocritique agent
+  revision_timeout: 4200      # Per-recommendation timeout for revision agent (does analysis work)
+  report_revision_timeout: 4200  # Timeout for report revision agent (incorporates revisions into report)
   max_revision_rounds: 2      # Max autocritique→revision→report revision cycles (0 = no revisions)
 
 # Repo assembly settings — assemble finalized files into a clean repo
 repo:
   enabled: true               # Assemble finalized files into repo/ after pipeline completes
   use_agent: true             # Use CLI agent (claude/codex) for repo assembly
-  agent_timeout: 1800         # Subprocess timeout in seconds for repo agent
+  agent_timeout: 4200         # Subprocess timeout in seconds for repo agent
 
 # Computational resources
 resources:
@@ -238,7 +239,7 @@ agents:
 
   # Analysis Agent (CLI subprocess — claude or codex)
   analysis_agent:
-    timeout: 1800
+    timeout: 4200
 
   # Title Generation Agent
   title_generator:

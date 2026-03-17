@@ -91,6 +91,12 @@ from AutoInterp.questions.agent_questions import (
     run_questions_agent,
     read_questions_outputs,
 )
+from AutoInterp.questions.agent_prioritizer import (
+    load_prioritizer_prompt_template,
+    _build_prioritizer_prompt,
+    run_prioritizer_agent,
+    read_prioritizer_outputs,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -3313,13 +3319,102 @@ async def streamlined_pipeline(framework: Dict[str, Any]) -> Dict[str, Any]:
                 skip_llm_call=True,
             )
         else:
-            active_question = await prioritize_questions(
-                question_manager=framework["question_manager"],
-                llm_interface=framework["llm_interface"],
-                config=config,
-                logger=logger,
-                evaluator=framework["evaluator"]
+            # Try agent-based prioritization first, fall back to LLM API
+            import shutil as _pri_shutil
+            _pri_questions_cfg = config.get("questions", {})
+            _pri_use_agent = _pri_questions_cfg.get("use_agent", True)
+            _pri_provider = (config.get("llm", {}).get("provider") or "").lower()
+            _pri_cli = "claude" if _pri_provider == "anthropic" else "codex"
+            _pri_agent_available = (
+                _pri_use_agent
+                and _pri_provider in ("anthropic", "openai")
+                and _pri_shutil.which(_pri_cli) is not None
             )
+
+            _pri_agent_handled = False
+            if _pri_agent_available:
+                print("[AUTOINTERP] Using CLI agent for question prioritization")
+                try:
+                    _pri_template = load_prioritizer_prompt_template()
+                    # Read questions.txt content to substitute into prompt
+                    _pri_q_path = path_resolver.get_project_dir() / "questions" / "questions.txt"
+                    _pri_q_text = ""
+                    if _pri_q_path.exists():
+                        _pri_q_text = _pri_q_path.read_text(encoding="utf-8", errors="replace").strip()
+                    _pri_prompt = _build_prioritizer_prompt(_pri_template, _pri_q_text)
+                    _pri_timeout = _pri_questions_cfg.get("agent_timeout", 300)
+                    _pri_model = config.get("llm", {}).get("model", "")
+                    _pri_start = time.time()
+
+                    _pri_progress_cb = None
+                    if pipeline_ui:
+                        def _pri_progress_cb(msg):
+                            pipeline_ui.step_progress("question_prioritization", msg)
+
+                    _pri_result = run_prioritizer_agent(
+                        provider=_pri_provider,
+                        project_dir=path_resolver.get_project_dir(),
+                        prompt_text=_pri_prompt,
+                        timeout=_pri_timeout,
+                        on_progress=_pri_progress_cb,
+                        model=_pri_model,
+                    )
+
+                    _pri_outputs = read_prioritizer_outputs(path_resolver.get_project_dir())
+
+                    if _pri_outputs["has_prioritized"]:
+                        _pri_agent_handled = True
+                        print("[AUTOINTERP] Prioritizer agent wrote prioritized_question.txt")
+
+                        # Print agent output
+                        print("\n============= PRIORITIZER AGENT OUTPUT =============")
+                        print(_pri_outputs["prioritized_text"])
+                        print("=====================================================\n")
+
+                    # Record the interaction in the dashboard
+                    if pipeline_ui:
+                        _pri_duration = time.time() - _pri_start
+                        pipeline_ui.llm_call_complete(
+                            agent_name="prioritizer_agent",
+                            display_name="Prioritizer Agent",
+                            prompt=_pri_prompt[:2000] + "..." if len(_pri_prompt) > 2000 else _pri_prompt,
+                            system_message=None,
+                            response=_pri_outputs.get("prioritized_text") or "(no output)",
+                            model=f"{_pri_provider} CLI agent",
+                            provider=_pri_provider,
+                            temperature=0,
+                            max_tokens=0,
+                            duration_seconds=_pri_duration,
+                            step_id="question_prioritization",
+                        )
+
+                except Exception as e:
+                    logger.warning(f"Prioritizer agent failed: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    print("[AUTOINTERP] Prioritizer agent failed; falling back to API.")
+            elif _pri_use_agent and _pri_provider in ("anthropic", "openai"):
+                print(f"[AUTOINTERP] Prioritizer agent enabled but '{_pri_cli}' CLI not found; falling back to API.")
+
+            if _pri_agent_handled:
+                # Agent wrote the file — skip LLM call, just read + rename
+                active_question = await prioritize_questions(
+                    question_manager=framework["question_manager"],
+                    llm_interface=framework["llm_interface"],
+                    config=config,
+                    logger=logger,
+                    evaluator=framework["evaluator"],
+                    skip_llm_call=True,
+                )
+            else:
+                # LLM API fallback
+                active_question = await prioritize_questions(
+                    question_manager=framework["question_manager"],
+                    llm_interface=framework["llm_interface"],
+                    config=config,
+                    logger=logger,
+                    evaluator=framework["evaluator"],
+                )
         if pipeline_ui:
             # Show first 80 chars of the selected question as summary
             summary = active_question[:80] + "..." if len(active_question) > 80 else active_question
