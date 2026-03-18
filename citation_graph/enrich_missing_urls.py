@@ -8,7 +8,7 @@ Strategy:
    between requests to respect rate limits).
 
 Usage:
-    cd arxiv_interp_graph && python enrich_missing_urls.py [--dry-run]
+    cd citation_graph && python enrich_missing_urls.py [--dry-run]
 """
 
 import os

@@ -14,7 +14,7 @@ from ..core.llm_interface import LLMInterface, CodeGeneration
 from ..core.utils import get_timestamp, load_yaml, ensure_directory, save_file, PathResolver, clean_code_content
 from ..analysis.analysis_executor import AnalysisExecutor
 
-PACKAGE_ROOT = Path(__file__).resolve().parents[1]
+PACKAGE_ROOT = Path(__file__).resolve().parents[2]
 
 class AnalysisGenerator:
     """
@@ -218,7 +218,7 @@ class AnalysisGenerator:
             print(f"[AUTOINTERP] Full traceback:\n{full_traceback}")
             
             # Try a fallback location
-            fallback_dir = PACKAGE_ROOT / "analysis" / analysis_dir_name / attempt_dir_name
+            fallback_dir = PACKAGE_ROOT / "src" / "analysis" / analysis_dir_name / attempt_dir_name
             ensure_directory(fallback_dir)
             fallback_path = fallback_dir / filename
             print(f"[AUTOINTERP] Using fallback path: {fallback_path}")

@@ -40,25 +40,25 @@ if __package__ is None or __package__ == "":
 
 import yaml
 
-from AutoInterp.questions.agent_questions import (
+from AutoInterp.src.questions.agent_questions import (
     load_questions_prompt_template,
     _build_questions_prompt,
     run_questions_agent,
     read_questions_outputs,
 )
-from AutoInterp.visualization.agent_visualization import (
+from AutoInterp.src.visualization.agent_visualization import (
     load_visualization_prompt_template,
     _build_visualization_prompt,
     run_visualization_agent,
     read_visualization_outputs,
 )
-from AutoInterp.reporting.agent_report import (
+from AutoInterp.src.reporting.agent_report import (
     load_report_prompt_template,
     _build_report_prompt,
     run_report_agent,
     read_report_outputs,
 )
-from AutoInterp.notebook.agent_notebook import (
+from AutoInterp.src.notebook.agent_notebook import (
     load_notebook_prompt_template,
     _build_notebook_prompt,
     run_notebook_agent,

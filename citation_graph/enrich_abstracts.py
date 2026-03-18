@@ -6,7 +6,7 @@ Uses batch API (500 per request); responses are cached in .cache so re-runs are 
 import os
 import sys
 
-# Run from arxiv_interp_graph root
+# Run from citation_graph root
 _here = os.path.dirname(os.path.abspath(__file__))
 if _here not in sys.path:
     sys.path.insert(0, _here)

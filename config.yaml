@@ -29,7 +29,7 @@ task:
 literature_search:
   enabled: true
   n_papers: 3   # number of papers to sample from graph for question generation
-  graph: null   # null = use arxiv_interp_graph/output/graph_state.json
+  graph: null   # null = use citation_graph/output/graph_state.json
   seed_id: null
   seed: null   # null = different papers each run; set e.g. 42 for reproducibility
   use_agent: true       # use CLI agent (claude/codex) for question generation; false = LLM API call

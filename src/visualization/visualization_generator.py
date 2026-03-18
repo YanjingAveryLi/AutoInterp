@@ -9,8 +9,8 @@ import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Tuple
 
-from AutoInterp.core.llm_interface import LLMInterface
-from AutoInterp.core.utils import PathResolver, save_file, clean_code_content
+from AutoInterp.src.core.llm_interface import LLMInterface
+from AutoInterp.src.core.utils import PathResolver, save_file, clean_code_content
 
 logger = logging.getLogger(__name__)
 

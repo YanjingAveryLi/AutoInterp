@@ -27,15 +27,15 @@ try:
 except ImportError:
     pass  # dotenv is optional
 
-from AutoInterp.core.utils import setup_logging, load_yaml, ensure_directory, get_timestamp, load_prompts, PathResolver, log_to_comprehensive_log, clean_code_content, PACKAGE_ROOT
-from AutoInterp.core.llm_interface import LLMInterface
-from AutoInterp.questions.question_manager import QuestionManager
-from AutoInterp.analysis.analysis_generator import AnalysisGenerator
-from AutoInterp.analysis.analysis_executor import AnalysisExecutor
-from AutoInterp.analysis.analysis_planner import AnalysisPlanner
-from AutoInterp.analysis.evaluator import Evaluator
-from AutoInterp.analysis.visualization_evaluator import VisualizationEvaluator
-from AutoInterp.analysis.agent_analysis import (
+from AutoInterp.src.core.utils import setup_logging, load_yaml, ensure_directory, get_timestamp, load_prompts, PathResolver, log_to_comprehensive_log, clean_code_content, PACKAGE_ROOT
+from AutoInterp.src.core.llm_interface import LLMInterface
+from AutoInterp.src.questions.question_manager import QuestionManager
+from AutoInterp.src.analysis.analysis_generator import AnalysisGenerator
+from AutoInterp.src.analysis.analysis_executor import AnalysisExecutor
+from AutoInterp.src.analysis.analysis_planner import AnalysisPlanner
+from AutoInterp.src.analysis.evaluator import Evaluator
+from AutoInterp.src.analysis.visualization_evaluator import VisualizationEvaluator
+from AutoInterp.src.analysis.agent_analysis import (
     setup_analysis_workspace,
     load_analysis_prompt_template,
     _build_analysis_prompt,
@@ -43,61 +43,61 @@ from AutoInterp.analysis.agent_analysis import (
     read_agent_outputs,
     read_confidence,
 )
-from AutoInterp.reporting.report_generator import ReportGenerator
-from AutoInterp.reporting.agent_report import (
+from AutoInterp.src.reporting.report_generator import ReportGenerator
+from AutoInterp.src.reporting.agent_report import (
     load_report_prompt_template,
     _build_report_prompt,
     run_report_agent,
     read_report_outputs,
 )
-from AutoInterp.visualization.agent_visualization import (
+from AutoInterp.src.visualization.agent_visualization import (
     load_visualization_prompt_template,
     _build_visualization_prompt,
     run_visualization_agent,
     read_visualization_outputs,
 )
-from AutoInterp.core.interactive import (
+from AutoInterp.src.core.interactive import (
     interactive_checkpoint,
     make_revision_call,
     is_interactive,
 )
-from AutoInterp.autocritique.agent_autocritique import (
+from AutoInterp.src.autocritique.agent_autocritique import (
     load_autocritique_prompt_template,
     _build_autocritique_prompt,
     run_autocritique_agent,
     read_autocritique_outputs,
 )
-from AutoInterp.autocritique.agent_revision import (
+from AutoInterp.src.autocritique.agent_revision import (
     load_revision_prompt_template,
     _build_revision_prompt,
     run_revision_agent,
     read_revision_outputs,
 )
-from AutoInterp.reporting.agent_report_revision import (
+from AutoInterp.src.reporting.agent_report_revision import (
     load_report_revision_prompt_template,
     _build_report_revision_prompt,
     run_report_revision_agent,
     read_report_revision_outputs,
 )
-from AutoInterp.repo.agent_repo import (
+from AutoInterp.src.repo.agent_repo import (
     load_repo_prompt_template,
     _build_repo_prompt,
     run_repo_agent,
     read_repo_outputs,
 )
-from AutoInterp.notebook.agent_notebook import (
+from AutoInterp.src.notebook.agent_notebook import (
     load_notebook_prompt_template,
     _build_notebook_prompt,
     run_notebook_agent,
     read_notebook_outputs,
 )
-from AutoInterp.questions.agent_questions import (
+from AutoInterp.src.questions.agent_questions import (
     load_questions_prompt_template,
     _build_questions_prompt,
     run_questions_agent,
     read_questions_outputs,
 )
-from AutoInterp.questions.agent_prioritizer import (
+from AutoInterp.src.questions.agent_prioritizer import (
     load_prioritizer_prompt_template,
     _build_prioritizer_prompt,
     run_prioritizer_agent,
@@ -2187,7 +2187,7 @@ async def evaluate_and_retry_visualization(
                     config = framework["config"]
 
                     # Initialize visualization components
-                    from AutoInterp.visualization.visualization_generator import VisualizationGenerator
+                    from AutoInterp.src.visualization.visualization_generator import VisualizationGenerator
                     llm_interface = framework["llm_interface"]
                     viz_generator = VisualizationGenerator(llm_interface, path_resolver)
 
@@ -2232,7 +2232,7 @@ async def evaluate_and_retry_visualization(
 
                         # Save and execute the new visualization script
                         viz_dir = path_resolver.ensure_path("visualizations")
-                        from AutoInterp.core.utils import get_timestamp
+                        from AutoInterp.src.core.utils import get_timestamp
                         timestamp = get_timestamp().replace(" ", "_").replace(":", "-")
                         viz_script_name = f"visualization_{analysis_name}_{timestamp}_retry{attempt + 1}.py"
                         viz_script_path = viz_dir / viz_script_name
@@ -2332,8 +2332,8 @@ async def generate_visualizations(
         Dictionary mapping analysis names to generated visualization file paths
     """
     import logging
-    from AutoInterp.visualization.visualization_planner import VisualizationPlanner
-    from AutoInterp.visualization.visualization_generator import VisualizationGenerator
+    from AutoInterp.src.visualization.visualization_planner import VisualizationPlanner
+    from AutoInterp.src.visualization.visualization_generator import VisualizationGenerator
     
     logger = logging.getLogger(__name__)
     
@@ -3041,7 +3041,7 @@ async def streamlined_pipeline(framework: Dict[str, Any]) -> Dict[str, Any]:
     # Setup console output logging immediately to capture all pipeline output
     path_resolver = framework["path_resolver"]
     project_dir = path_resolver.get_project_dir()
-    from AutoInterp.core.utils import setup_console_logging_to_file
+    from AutoInterp.src.core.utils import setup_console_logging_to_file
     setup_console_logging_to_file(project_dir)
     
     # Generate a task name from the description for logging
@@ -3076,10 +3076,10 @@ async def streamlined_pipeline(framework: Dict[str, Any]) -> Dict[str, Any]:
             _ctx_start = time.time() if pipeline_ui else None
             _ctx_prompt_used = ""
             try:
-                arxiv_interp_root = PACKAGE_ROOT / "arxiv_interp_graph"
+                arxiv_interp_root = PACKAGE_ROOT / "citation_graph"
                 if str(arxiv_interp_root) not in sys.path:
                     sys.path.insert(0, str(arxiv_interp_root))
-                graph_path = ctx_cfg.get("graph") or (PACKAGE_ROOT / "arxiv_interp_graph" / "output" / "graph_state.json")
+                graph_path = ctx_cfg.get("graph") or (PACKAGE_ROOT / "citation_graph" / "output" / "graph_state.json")
                 graph_path = Path(graph_path)
                 if not graph_path.is_absolute():
                     graph_path = (PACKAGE_ROOT / graph_path).resolve()
@@ -3518,6 +3518,7 @@ async def streamlined_pipeline(framework: Dict[str, Any]) -> Dict[str, Any]:
         _all_rev_responses = []       # responses across all rounds
         _revised_report_filename = None  # basename of the most recent revised report
         _ac_final_round = 0           # last round that completed
+        _final_verdict = None         # "Accept", "Reject", "Revise and Resubmit", or None
 
         if _ac_enabled and _ac_use_agent:
             _ac_cli_name = "claude" if _ac_provider == "anthropic" else "codex"
@@ -3622,19 +3623,22 @@ async def streamlined_pipeline(framework: Dict[str, Any]) -> Dict[str, Any]:
                     except Exception:
                         _review_text = ""
 
-                    _is_revise = "**Revise and Resubmit**" in _review_text
+                    _is_revise = "Verdict: Revise and Resubmit" in _review_text
                     _has_recs = bool(_ac_outputs and _ac_outputs.get("recommendations"))
                     _rounds_remaining = _ac_round < _ac_max_rounds + 1  # round 1 is the initial review; revisions use rounds 1.._ac_max_rounds
 
                     if not (_is_revise and _has_recs and _rounds_remaining):
                         # Terminal verdict or max rounds reached
                         if _is_revise and not _rounds_remaining:
+                            _final_verdict = "Revise and Resubmit"
                             print(f"[AUTOINTERP] AutoCritique round {_ac_round}: Revise and Resubmit, but max revision rounds ({_ac_max_rounds}) reached")
                             logger.info("Max revision rounds reached (%d); stopping", _ac_max_rounds)
                         elif _is_revise and not _has_recs:
+                            _final_verdict = "Revise and Resubmit"
                             print(f"[AUTOINTERP] AutoCritique round {_ac_round}: Revise and Resubmit but no recommendations; stopping")
                         else:
-                            _verdict_label = "Accept" if "**Accept**" in _review_text else ("Reject" if "**Reject**" in _review_text else "Unknown")
+                            _verdict_label = "Accept" if "Verdict: Accept" in _review_text else ("Reject" if "Verdict: Reject" in _review_text else "Unknown")
+                            _final_verdict = _verdict_label
                             print(f"[AUTOINTERP] AutoCritique round {_ac_round} verdict: {_verdict_label}")
                             logger.info("AutoCritique round %d verdict: %s", _ac_round, _verdict_label)
                         break
@@ -3817,6 +3821,27 @@ async def streamlined_pipeline(framework: Dict[str, Any]) -> Dict[str, Any]:
                 pipeline_ui.step_skipped("autocritique", reason="disabled")
                 pipeline_ui.step_skipped("revision", reason="autocritique disabled")
                 pipeline_ui.step_skipped("report_revision", reason="autocritique disabled")
+
+        # ------------------------------------------------------------------
+        # Rename project directory on Reject verdict
+        # ------------------------------------------------------------------
+        if _final_verdict == "Reject":
+            import os as _os_reject
+            _old_proj_dir = path_resolver.get_project_dir()
+            _reject_name = "REJECT_" + path_resolver.project_id
+            _new_proj_dir = path_resolver.base_project_dir / _reject_name
+            if _old_proj_dir.exists() and not _new_proj_dir.exists():
+                try:
+                    _os_reject.rename(_old_proj_dir, _new_proj_dir)
+                    config["project_id"] = _reject_name
+                    path_resolver.update_project_id(_reject_name)
+                    if pipeline_ui:
+                        pipeline_ui.update_project_dir(_new_proj_dir)
+                    logger.info("Reject verdict — renamed project to '%s'", _reject_name)
+                    print(f"[AUTOINTERP] Reject verdict — project renamed to: {_reject_name}")
+                except Exception as _rej_exc:
+                    logger.error("Failed to rename project on Reject: %s", _rej_exc)
+                    print(f"[AUTOINTERP] Warning: Could not rename project on Reject: {_rej_exc}")
 
         # ------------------------------------------------------------------
         # Repo Assembly — assemble finalized files into a clean repo
@@ -4062,7 +4087,7 @@ def build_argument_parser() -> argparse.ArgumentParser:
     # literature-search: seed + forward/backward -> 3 papers -> PDFs + manifest -> optional LLM question
     ctx_parser = subparsers.add_parser("literature-search", help="Build 3-paper literature search (seed + citing + cited), PDFs + manifest, optional research question")
     ctx_parser.add_argument("--output-dir", default=None, help="Output directory; default: auto from generated question (projects/<slug>_<timestamp>/questions)")
-    ctx_parser.add_argument("--graph", default=None, help="Path to graph_state.json (default: arxiv_interp_graph/output/graph_state.json)")
+    ctx_parser.add_argument("--graph", default=None, help="Path to graph_state.json (default: citation_graph/output/graph_state.json)")
     ctx_parser.add_argument("--seed-id", default=None, help="Seed paper ID (default: random)")
     ctx_parser.add_argument("--seed", type=int, default=None, help="Random seed (default: different each run; set e.g. 42 for reproducibility)")
     ctx_parser.add_argument("--no-download", action="store_true", help="Do not download PDFs")
@@ -4076,18 +4101,18 @@ def build_argument_parser() -> argparse.ArgumentParser:
 def run_literature_search_cmd(args: argparse.Namespace) -> None:
     """Build 3-paper literature search (seed + forward/backward), PDFs + manifest, optional LLM question."""
     pkg_root = Path(__file__).resolve().parent
-    arxiv_interp_root = pkg_root / "arxiv_interp_graph"
+    arxiv_interp_root = pkg_root / "citation_graph"
     if str(arxiv_interp_root) not in sys.path:
         sys.path.insert(0, str(arxiv_interp_root))
     try:
         from literature_search.run import run_literature_search
         from api_client import SemanticScholarClient
     except ImportError as e:
-        print(f"[AUTOINTERP] ERROR: Cannot load literature_search (is arxiv_interp_graph present?): {e}")
+        print(f"[AUTOINTERP] ERROR: Cannot load literature_search (is citation_graph present?): {e}")
         sys.exit(1)
     graph_path = args.graph
     if not graph_path:
-        graph_path = pkg_root / "arxiv_interp_graph" / "output" / "graph_state.json"
+        graph_path = pkg_root / "citation_graph" / "output" / "graph_state.json"
     graph_path = Path(graph_path)
     if not graph_path.is_absolute():
         graph_path = (pkg_root / graph_path).resolve()
@@ -4348,7 +4373,7 @@ async def async_main(args: argparse.Namespace) -> None:
         
         # Initialize PipelineUI if rich terminal or HTML dashboard is enabled
         try:
-            from AutoInterp.core.pipeline_ui import PipelineUI
+            from AutoInterp.src.core.pipeline_ui import PipelineUI
             pipeline_ui = PipelineUI(
                 project_dir=framework["path_resolver"].get_project_dir(),
                 config=framework["config"],

@@ -95,9 +95,9 @@ python -m AutoInterp --projects-dir /absolute/or/relative/path
 interp-agent --help
 ```
 
-### arxiv_interp_graph (Literature Search)
+### citation_graph (Literature Search)
 
-AutoInterp ships with the `arxiv_interp_graph` module, which builds a citation graph of interpretability papers and can generate a lightweight literature search. The literature search selects three related papers, downloads their full text (PDF or HTML), and generates research questions — either via an external AI agent (Claude CLI or Codex CLI) or via an LLM API call.
+AutoInterp ships with the `citation_graph` module, which builds a citation graph of interpretability papers and can generate a lightweight literature search. The literature search selects three related papers, downloads their full text (PDF or HTML), and generates research questions — either via an external AI agent (Claude CLI or Codex CLI) or via an LLM API call.
 
 ```bash
 # Run literature search from the repo root
@@ -114,7 +114,7 @@ python main.py literature-search
 
 The agent reads the downloaded articles (PDFs and HTML files) directly and writes `Research_Questions.txt`. If the agent fails (CLI not installed, timeout, etc.), the system falls back to the LLM API call automatically. Set `literature_search.use_agent: false` in `config.yaml` to always use the LLM API fallback.
 
-**Article download pipeline:** Each paper in the pre-built citation graph (1003 papers) stores an `arxiv_id` (96.6%) or `open_access_url` (2.9%) so downloads work without live API calls in most cases. The 5 papers (0.5%) with no stored URL are automatically excluded from literature search sampling — they remain in the graph for topology/statistics but won't be selected. If a download fails at runtime (broken URL, timeout), the system automatically retries with a replacement paper from the graph (up to 3 attempts per slot). Papers from Distill and the Transformer Circuits Thread are downloaded as HTML files; all others as PDFs. To re-enrich the graph after adding new papers, run `cd arxiv_interp_graph && python enrich_arxiv_ids.py`.
+**Article download pipeline:** Each paper in the pre-built citation graph (1003 papers) stores an `arxiv_id` (96.6%) or `open_access_url` (2.9%) so downloads work without live API calls in most cases. The 5 papers (0.5%) with no stored URL are automatically excluded from literature search sampling — they remain in the graph for topology/statistics but won't be selected. If a download fails at runtime (broken URL, timeout), the system automatically retries with a replacement paper from the graph (up to 3 attempts per slot). Papers from Distill and the Transformer Circuits Thread are downloaded as HTML files; all others as PDFs. To re-enrich the graph after adding new papers, run `cd citation_graph && python enrich_arxiv_ids.py`.
 
 To use agent mode with Anthropic, install and authenticate the Claude CLI:
 ```bash
@@ -332,9 +332,11 @@ Set `reporting.use_agent: false` in `config.yaml` to always use the legacy pipel
 
 ### AutoCritique
 
-When `autocritique.enabled: true` (default) and `autocritique.use_agent: true`, an automated peer review step runs after report generation. A CLI agent subprocess reads the report, analyses, and visualizations, then produces a formal review with a verdict (**Reject**, **Revise and Resubmit**, or **Accept**).
+When `autocritique.enabled: true` (default) and `autocritique.use_agent: true`, an automated peer review step runs after report generation. A CLI agent subprocess reads the report, analyses, and visualizations, then produces a formal review with a verdict (**Reject**, **Revise and Resubmit**, or **Accept**). The agent is instructed to include one of three exact sentinel strings (`Verdict: Reject`, `Verdict: Revise and Resubmit`, `Verdict: Accept`) which the pipeline parses programmatically.
 
 If the verdict is **Revise and Resubmit**, the agent also writes individual `Recommendation_N.md` files — one per issue — that are designed to be fed directly into the analysis agent prompts during a revision cycle.
+
+If the final verdict is **Reject**, the pipeline renames the project directory with a `REJECT_` prefix (e.g. `REJECT_my_study_2026-03-17T10-00-00`) before proceeding to repo assembly and notebook generation.
 
 AutoCritique outputs are organized into round-based subdirectories (`autocritique/round_1/`, `autocritique/round_2/`, etc.) to support multiple review rounds:
 

@@ -43,7 +43,15 @@ prompt_template: |
      Numbered list of questions that would help clarify the work or strengthen the paper.
 
      ## Verdict
-     One of the following:
+     State your verdict as a standalone line using one of these **exact** strings:
+
+         Verdict: Reject
+         Verdict: Revise and Resubmit
+         Verdict: Accept
+
+     The pipeline parses this string programmatically to decide next steps, so one of these three exact strings MUST appear verbatim in your review. Do not bold, quote, or alter them. After the verdict line, you may add a brief justification.
+
+     Guidance:
      - **Reject** — Fundamental methodological flaws, unsupported claims, or insufficient analysis that cannot be addressed with revisions.
      - **Revise and Resubmit** — The work has merit but requires significant revisions to address identified weaknesses before it can be accepted. You MUST write Recommendation files (see step 6).
      - **Accept** — The work is sound, well-executed, and makes a meaningful contribution. Minor issues may be noted but do not require re-review.
