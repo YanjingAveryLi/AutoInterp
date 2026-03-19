@@ -175,27 +175,21 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
                 print("\nAfter installing Docker, please restart the AutoInterp system.")
                 sys.exit(0)
             elif choice == "2":
-                if self._disable_sandbox_mode():
-                    print("\n" + "="*60)
-                    print("SANDBOX MODE DISABLED")
-                    print("="*60)
+                saved = self._disable_sandbox_mode()
+                print("\n" + "="*60)
+                print("SANDBOX MODE DISABLED")
+                print("="*60)
+                if saved:
                     print("Sandbox mode has been disabled in your config.yaml file.")
-                    print("Code will now execute directly in your Python environment.")
-                    print()
-                    print("To re-enable sandbox mode later:")
-                    print("1. Install Docker on your system")
-                    print("2. Change 'sandbox: false' to 'sandbox: true' in config.yaml")
-                    print("   (under analysis.execution section)")
-                    print("="*60)
-                    print()
-
-                    # Update internal state to reflect disabled sandboxing
-                    self.sandbox_enabled = False
-                    return
                 else:
-                    print("Failed to update configuration. Please manually edit config.yaml")
-                    print("Change 'analysis.execution.sandbox' to false")
-                    sys.exit(1)
+                    print("Could not update config.yaml (read-only or permissions issue).")
+                    print("Sandbox is disabled for this session only.")
+                print("Code will now execute directly in your Python environment.")
+                print("="*60)
+                print()
+
+                self.sandbox_enabled = False
+                return
             elif choice == "3":
                 print("Exiting...")
                 sys.exit(0)
