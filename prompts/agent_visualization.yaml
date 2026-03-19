@@ -20,6 +20,7 @@ prompt_template: |
      - Use publication-quality settings: clear labels, appropriate font sizes, legends where needed, tight layout
      - Handle GPU/CPU selection automatically if loading a model (use CUDA if available, else CPU)
      - Print a brief description of what the figure shows to stdout
+     - Use a minimalist academic style with soft but vivid colors. None of the colors should look too primary, they should look muted but technical. Use a nice sans serif font unless instructed otherwise.
 
      After writing each script, run it. If it fails, debug and fix it until it produces the figure successfully. Then look at the produced figure and verify it looks correct and readable.
 
