@@ -31,7 +31,7 @@ from AutoInterp.src.core.utils import setup_logging, load_yaml, ensure_directory
 from AutoInterp.src.core.llm_interface import LLMInterface
 from AutoInterp.src.questions.question_manager import QuestionManager
 from AutoInterp.src.analysis.analysis_generator import AnalysisGenerator
-from AutoInterp.src.analysis.analysis_executor import AnalysisExecutor
+from AutoInterp.src.analysis.analysis_executor import AnalysisExecutor, check_docker_sandbox
 from AutoInterp.src.analysis.analysis_planner import AnalysisPlanner
 from AutoInterp.src.analysis.evaluator import Evaluator
 from AutoInterp.src.analysis.visualization_evaluator import VisualizationEvaluator
@@ -4221,6 +4221,9 @@ async def async_main(args: argparse.Namespace) -> None:
         # Apply any saved user option defaults before anything reads config
         load_user_options(framework["config"])
         load_manual_model_config(framework["config"])
+
+        # Check Docker availability once before anything else
+        check_docker_sandbox(framework["config"])
 
         # Provider and model selection (loops back if user picks Options or Manual)
         while True:

@@ -29,6 +29,149 @@ from ..core.utils import (
     ensure_directory
 )
 
+
+def check_docker_sandbox(config: Dict[str, Any]) -> None:
+    """
+    Check if Docker is available when sandbox mode is enabled.
+    Prompts the user once at startup and updates config in-memory.
+    Call this before any AnalysisExecutor is created.
+    """
+    execution_mode = config.get("execution", {}).get("mode", "sandbox")
+    analysis_execution = config.get("analysis", {}).get("execution", {})
+    sandbox_enabled = bool(analysis_execution.get("sandbox")) and execution_mode == "sandbox"
+
+    if not sandbox_enabled:
+        return
+
+    if shutil.which("docker"):
+        return
+
+    # Docker not found — prompt user
+    print("\n" + "=" * 60)
+    print("DOCKER NOT FOUND")
+    print("=" * 60)
+    print("Docker is required for sandbox mode but was not found on your system.")
+    print("Sandbox mode provides security isolation when executing AI-generated code.")
+    print()
+
+    while True:
+        print("What would you like to do?")
+        print("1. Install Docker (get installation instructions)")
+        print("2. Proceed without sandboxing (disable sandbox mode)")
+        print("3. Exit")
+        print()
+
+        try:
+            choice = input("Please select an option (1-3): ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print("\nExiting...")
+            sys.exit(1)
+
+        if choice == "1":
+            _show_docker_installation_instructions()
+            print("\nAfter installing Docker, please restart the AutoInterp system.")
+            sys.exit(0)
+        elif choice == "2":
+            saved = _disable_sandbox_in_file()
+            print("\n" + "=" * 60)
+            print("SANDBOX MODE DISABLED")
+            print("=" * 60)
+            if saved:
+                print("Sandbox mode has been disabled in your config.yaml file.")
+            else:
+                print("Could not update config.yaml (read-only or permissions issue).")
+                print("Sandbox is disabled for this session only.")
+            print("Code will now execute directly in your Python environment.")
+            print("=" * 60)
+            print()
+
+            # Update config in-memory so no AnalysisExecutor triggers the check again
+            config.setdefault("analysis", {}).setdefault("execution", {})["sandbox"] = False
+            return
+        elif choice == "3":
+            print("Exiting...")
+            sys.exit(0)
+        else:
+            print("Invalid choice. Please select 1, 2, or 3.")
+            print()
+
+
+def _disable_sandbox_in_file() -> bool:
+    """Try to persist sandbox=false to config.yaml. Returns True on success."""
+    try:
+        import yaml
+        config_path = Path(__file__).resolve().parents[2] / "config.yaml"
+        if not config_path.exists():
+            return False
+        with open(config_path, "r") as f:
+            config_data = yaml.safe_load(f)
+        config_data.setdefault("analysis", {}).setdefault("execution", {})["sandbox"] = False
+        with open(config_path, "w") as f:
+            yaml.dump(config_data, f, default_flow_style=False, sort_keys=False)
+        return True
+    except Exception:
+        return False
+
+
+def _show_docker_installation_instructions():
+    """Display Docker installation instructions for different operating systems."""
+    import platform
+
+    print("\n" + "=" * 60)
+    print("DOCKER INSTALLATION INSTRUCTIONS")
+    print("=" * 60)
+
+    system = platform.system().lower()
+
+    if system == "linux":
+        print("For Linux (Ubuntu/Debian):")
+        print("1. Update package index:")
+        print("   sudo apt-get update")
+        print()
+        print("2. Install Docker:")
+        print("   sudo apt-get install docker.io")
+        print()
+        print("3. Start and enable Docker:")
+        print("   sudo systemctl start docker")
+        print("   sudo systemctl enable docker")
+        print()
+        print("4. Add your user to docker group (optional, to run without sudo):")
+        print("   sudo usermod -aG docker $USER")
+        print("   # Log out and back in for this to take effect")
+        print()
+        print("For other Linux distributions, visit: https://docs.docker.com/engine/install/")
+    elif system == "darwin":
+        print("For macOS:")
+        print("1. Download Docker Desktop from:")
+        print("   https://www.docker.com/products/docker-desktop")
+        print()
+        print("2. Install the downloaded .dmg file")
+        print()
+        print("3. Start Docker Desktop from Applications")
+        print()
+        print("Alternative - using Homebrew:")
+        print("   brew install --cask docker")
+    elif system == "windows":
+        print("For Windows:")
+        print("1. Download Docker Desktop from:")
+        print("   https://www.docker.com/products/docker-desktop")
+        print()
+        print("2. Install the downloaded .exe file")
+        print()
+        print("3. Restart your computer if prompted")
+        print()
+        print("4. Start Docker Desktop")
+        print()
+        print("Note: Docker Desktop requires Windows 10/11 with WSL2 enabled")
+    else:
+        print(f"For {system}:")
+        print("Please visit https://docs.docker.com/engine/install/ for installation instructions")
+
+    print()
+    print("After installation, verify Docker is working by running:")
+    print("   docker --version")
+    print("=" * 60)
+
 class AnalysisExecutor:
     """
     Executes analysis scripts in a secure environment.
@@ -137,11 +280,13 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
         )
         
         if self.sandbox_enabled:
-            docker_path = shutil.which("docker")
-            if not docker_path:
-                self._handle_docker_not_found()
-            else:
+            if shutil.which("docker"):
                 self.logger.info(f"Docker sandbox enabled using image: {self.docker_image}")
+            else:
+                # check_docker_sandbox() should have been called earlier;
+                # if we still get here, just disable silently.
+                self.logger.warning("Docker not found — disabling sandbox")
+                self.sandbox_enabled = False
 
     def _handle_docker_not_found(self):
         """
