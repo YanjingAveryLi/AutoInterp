@@ -1022,7 +1022,6 @@ async def prioritize_questions(
     if "title" in config:
         # We already set new_project_id in config when we extracted the title
         new_project_id = config["project_id"]
-        print(f"[AUTOINTERP] Using extracted title for project ID: {new_project_id}")
     else:
         # Fall back to using the task name with timestamp
         default_timestamp = get_timestamp("%Y-%m-%dT%H-%M-%S")
@@ -1058,7 +1057,6 @@ async def prioritize_questions(
         try:
             # Log before renaming
             logger.info(f"Renaming project directory from '{path_resolver.project_id}' to '{new_project_id}'")
-            print(f"[AUTOINTERP] Renaming project from '{path_resolver.project_id}' to '{new_project_id}'...")
             
             # Rename the directory (this moves all files from old to new location)
             import os
@@ -1088,7 +1086,13 @@ async def prioritize_questions(
                 _pipeline_ui.update_project_dir(new_project_dir)
 
             logger.info(f"Successfully renamed project directory to '{new_project_id}'")
-            print(f"[AUTOINTERP] Project directory renamed to: {new_project_id}")
+
+            # Print dashboard location now that the project has its permanent name
+            _lavender = "\033[38;5;183m"
+            _reset = "\033[0m"
+            _dashboard_file = new_project_dir / "dashboard.html"
+            if _dashboard_file.exists():
+                print(f"Live progress dashboard can be found here: {_lavender}{_dashboard_file}{_reset}")
 
             # Console logging was already set up at the start of the pipeline
             # The rename operation moved the entire directory including console.log
@@ -2793,7 +2797,6 @@ async def generate_report(
 
     if _viz_agent_available:
         # --- Agent-based visualization ---
-        print("[AUTOINTERP] Using CLI agent for visualization generation")
         logger.info("Using CLI agent for visualization (provider=%s)", _provider)
 
         try:
@@ -2828,6 +2831,20 @@ async def generate_report(
             if visualizations:
                 logger.info("Visualization agent produced %d figures", len(visualizations))
                 print(f"[AUTOINTERP] Visualization agent produced {len(visualizations)} figures")
+                # Feed figures and captions to dashboard
+                if pipeline_ui:
+                    import glob as _glob_mod
+                    for _vf in sorted(_glob_mod.glob(str(viz_dir / "figure_*.*"))):
+                        _vf_name = Path(_vf).name
+                        _vf_ext = Path(_vf).suffix.lower()
+                        if _vf_ext in ('.png', '.jpg', '.jpeg', '.svg'):
+                            pipeline_ui.step_output("visualization", _vf_name, f"visualizations/{_vf_name}")
+                    for _cf in sorted(_glob_mod.glob(str(viz_dir / "caption_*.txt"))):
+                        try:
+                            _cap_text = Path(_cf).read_text(encoding="utf-8", errors="replace")
+                            pipeline_ui.step_output("visualization", Path(_cf).name, _cap_text)
+                        except Exception:
+                            pass
             else:
                 logger.warning("Visualization agent produced no figures; falling back to legacy pipeline")
                 print("[AUTOINTERP] Visualization agent produced no figures — falling back to legacy pipeline")
@@ -2874,7 +2891,6 @@ async def generate_report(
 
     if _report_agent_available:
         # --- Agent-based report generation ---
-        print("[AUTOINTERP] Using CLI agent for report generation")
         logger.info("Using CLI agent for report generation (provider=%s)", _provider)
 
         try:
@@ -2930,6 +2946,11 @@ async def generate_report(
                         logger.warning(f"Interactive checkpoint failed for agent report: {e}")
 
                 if pipeline_ui:
+                    try:
+                        _report_text = Path(report_path).read_text(encoding="utf-8", errors="replace")
+                        pipeline_ui.step_output("report_generation", Path(report_path).name, _report_text)
+                    except Exception:
+                        pass
                     pipeline_ui.step_complete("report_generation", summary=str(report_path))
                 return {
                     "report_path": report_path,
@@ -2984,6 +3005,11 @@ async def generate_report(
                 logger.warning(f"Interactive checkpoint failed for legacy report: {e}")
 
         if pipeline_ui:
+            try:
+                _report_text = Path(report_path).read_text(encoding="utf-8", errors="replace")
+                pipeline_ui.step_output("report_generation", Path(report_path).name, _report_text)
+            except Exception:
+                pass
             pipeline_ui.step_complete("report_generation", summary=str(report_path))
 
         return {
@@ -3235,7 +3261,6 @@ async def streamlined_pipeline(framework: Dict[str, Any]) -> Dict[str, Any]:
             )
 
             if _q_agent_available:
-                print("[AUTOINTERP] Using CLI agent for question generation + prioritization")
                 try:
                     _q_template = load_questions_prompt_template()
                     _q_task_desc = config.get("task", {}).get("description", "")
@@ -3348,7 +3373,6 @@ async def streamlined_pipeline(framework: Dict[str, Any]) -> Dict[str, Any]:
 
             _pri_agent_handled = False
             if _pri_agent_available:
-                print("[AUTOINTERP] Using CLI agent for question prioritization")
                 try:
                     _pri_template = load_prioritizer_prompt_template()
                     # Read questions.txt content to substitute into prompt
@@ -3549,7 +3573,6 @@ async def streamlined_pipeline(framework: Dict[str, Any]) -> Dict[str, Any]:
         )
 
         if _agent_available:
-            print("[AUTOINTERP] Using CLI agent for analysis")
             all_analyses, all_evaluations = await iterative_analysis_agent(
                 active_question=active_question,
                 config=config,
@@ -4056,7 +4079,7 @@ async def streamlined_pipeline(framework: Dict[str, Any]) -> Dict[str, Any]:
                 try:
                     _nb_template = load_notebook_prompt_template()
                     _nb_prompt_text = _build_notebook_prompt(_nb_template, path_resolver.get_project_dir())
-                    _nb_timeout = _nb_cfg.get("agent_timeout", 900)
+                    _nb_timeout = _nb_cfg.get("agent_timeout", 4200)
 
                     _nb_progress_cb = None
                     if pipeline_ui:
@@ -4182,12 +4205,20 @@ def build_argument_parser() -> argparse.ArgumentParser:
         help="Root directory for generated projects (defaults to the package projects folder)",
         default=None,
     )
+    parser.add_argument("--provider", choices=["anthropic", "openai", "openrouter"],
+                        help="LLM provider (skips interactive menu; requires --model)")
+    parser.add_argument("--model", help="Model ID, e.g. claude-sonnet-4-6 (requires --provider)")
+    parser.add_argument("--topic", help="Research topic (skips interactive prompt; pass \"\" for auto-generation)")
     subparsers = parser.add_subparsers(dest="command", help="Command to run (default: run)")
     # Default: run the full interpretability pipeline
     run_parser = subparsers.add_parser("run", help="Run the full interpretability research pipeline (default)")
     run_parser.add_argument("--config", help="Path to override configuration file", default=None)
     run_parser.add_argument("--venv", help="Path to existing virtual environment to use", default=None)
     run_parser.add_argument("--projects-dir", help="Root directory for projects", default=None)
+    run_parser.add_argument("--provider", choices=["anthropic", "openai", "openrouter"],
+                            help="LLM provider (skips interactive menu; requires --model)")
+    run_parser.add_argument("--model", help="Model ID, e.g. claude-sonnet-4-6 (requires --provider)")
+    run_parser.add_argument("--topic", help="Research topic (skips interactive prompt; pass \"\" for auto-generation)")
     run_parser.set_defaults(command="run")
 
     # literature-search: seed + forward/backward -> 3 papers -> PDFs + manifest -> optional LLM question
@@ -4331,16 +4362,24 @@ async def async_main(args: argparse.Namespace) -> None:
         # Check Docker availability once before anything else
         check_docker_sandbox(framework["config"])
 
-        # Provider and model selection (loops back if user picks Options or Manual)
-        while True:
-            selected_provider, selected_model = select_provider_and_model()
-            if selected_provider == "options":
-                show_options_menu(framework["config"])
-                continue
-            if selected_provider == "manual":
-                show_manual_config_menu(framework["config"])
+        # Provider and model selection — skip interactive menu if CLI flags given
+        if args.provider and args.model:
+            selected_provider = args.provider
+            selected_model = args.model
+            print(f"\n[AUTOINTERP] Using CLI-specified provider={selected_provider}, model={selected_model}")
+        elif args.provider or args.model:
+            print("[AUTOINTERP] ERROR: --provider and --model must be specified together.")
+            sys.exit(1)
+        else:
+            while True:
+                selected_provider, selected_model = select_provider_and_model()
+                if selected_provider == "options":
+                    show_options_menu(framework["config"])
+                    continue
+                if selected_provider == "manual":
+                    show_manual_config_menu(framework["config"])
+                    break
                 break
-            break
 
         # Apply provider/model override to config (no-op for manual)
         framework["config"] = apply_provider_model_override(
@@ -4430,10 +4469,17 @@ async def async_main(args: argparse.Namespace) -> None:
         print("Welcome to the AutoInterp Agent Framework!")
         print("="*60 + f"{color_end}")
         literature_search_enabled = framework["config"].get("literature_search", {}).get("enabled", False)
-        if literature_search_enabled:
-            user_input = input("\nEnter a topic for LLM interpretability research (press Enter to generate one from the literature): ").strip()
+        if args.topic is not None:
+            user_input = args.topic.strip()
+            if user_input:
+                print(f"[AUTOINTERP] Using CLI-specified topic: {user_input}")
+            else:
+                print("[AUTOINTERP] Empty --topic; will auto-generate from literature/LLM.")
         else:
-            user_input = input("\nEnter a topic for LLM interpretability research (press Enter to generate one with LLM): ").strip()
+            if literature_search_enabled:
+                user_input = input("\nEnter a topic for LLM interpretability research (press Enter to generate one from the literature): ").strip()
+            else:
+                user_input = input("\nEnter a topic for LLM interpretability research (press Enter to generate one with LLM): ").strip()
 
         if not user_input:
             if literature_search_enabled:

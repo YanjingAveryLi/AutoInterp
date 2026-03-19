@@ -95,6 +95,23 @@ python -m AutoInterp --projects-dir /absolute/or/relative/path
 interp-agent --help
 ```
 
+### Headless / Batch Runs
+
+The `--provider`, `--model`, and `--topic` flags bypass the interactive menus, enabling fully non-interactive execution (e.g. SLURM `sbatch` jobs):
+
+```bash
+# Fully headless — specify provider, model, and topic
+python main.py run --provider anthropic --model claude-sonnet-4-6 --topic "superposition in LLMs"
+
+# Auto-generate topic from literature search or LLM (empty string)
+python main.py run --provider openai --model o3 --topic ""
+```
+
+- `--provider` and `--model` must be specified together; omitting both falls through to the interactive menu
+- `--topic "some topic"` sets the research topic and disables literature search (same as typing a topic interactively)
+- `--topic ""` triggers auto-generation from literature search or LLM, depending on config
+- Omitting `--topic` entirely falls through to the interactive prompt
+
 ### citation_graph (Literature Search)
 
 AutoInterp ships with the `citation_graph` module, which builds a citation graph of interpretability papers and can generate a lightweight literature search. The literature search selects three related papers, downloads their full text (PDF or HTML), and generates research questions — either via an external AI agent (Claude CLI or Codex CLI) or via an LLM API call.

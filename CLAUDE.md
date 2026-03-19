@@ -12,12 +12,29 @@ python main.py          # interactive provider selection, then full pipeline
 python main.py run      # same as above
 python main.py literature-search  # run literature search only (no full pipeline)
 
+# Headless / SLURM batch runs (no interactive prompts)
+python main.py run --provider anthropic --model claude-sonnet-4-6 --topic "superposition in LLMs"
+python main.py run --provider anthropic --model claude-sonnet-4-6 --topic ""  # auto-generate topic
+
 # Prompt testing (replay individual stages against completed runs)
 python test_prompt.py viz --project <completed_run> --dry-run   # preview prompt
 python test_prompt.py viz --project <completed_run>             # run stage
 ```
 
 Environment variables: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, `HF_TOKEN` (set whichever provider you use).
+
+### Headless / Batch Runs
+
+The `--provider`, `--model`, and `--topic` CLI flags bypass the two interactive `input()` prompts (provider/model menu and topic input), enabling fully non-interactive runs (e.g. SLURM `sbatch` jobs):
+
+```bash
+python main.py run --provider anthropic --model claude-sonnet-4-6 --topic "superposition"
+```
+
+- `--provider` and `--model` must be specified together; omitting both falls through to the interactive menu
+- `--topic "some topic"` sets the research topic and disables literature search (same as typing a topic interactively)
+- `--topic ""` (empty string) triggers auto-generation from literature search or LLM, depending on config
+- Omitting `--topic` entirely falls through to the interactive prompt
 
 ## Key Architecture
 
