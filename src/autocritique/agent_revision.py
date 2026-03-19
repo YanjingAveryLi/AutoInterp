@@ -131,8 +131,8 @@ def run_revision_agent(
         watch_dir=round_dir,
         patterns=[
             MilestonePattern(
-                glob=f"Reviewer_{idx}_log.md",
-                message_fn=lambda _p, _idx=idx: f"Wrote Reviewer_{_idx}_log.md",
+                glob=f"Response_{idx}_log.md",
+                message_fn=lambda _p, _idx=idx: f"Wrote Response_{_idx}_log.md",
             ),
             MilestonePattern(
                 glob=f"Response_{idx}.md",
@@ -193,7 +193,7 @@ def read_revision_outputs(
     if not round_dir.exists():
         return outputs
 
-    log_file = round_dir / f"Reviewer_{idx}_log.md"
+    log_file = round_dir / f"Response_{idx}_log.md"
     response_file = round_dir / f"Response_{idx}.md"
 
     if log_file.is_file():

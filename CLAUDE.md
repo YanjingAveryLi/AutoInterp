@@ -242,9 +242,9 @@ autocritique/
     AutoCritique_review.md    # Formal review (Summary, Strengths, Weaknesses, Minor Issues, Questions, Verdict, Caveats)
     Recommendation_1.md       # (only if verdict is "Revise and Resubmit")
     Recommendation_2.md
-    Reviewer_1_log.md         # Revision agent working notes (rec 1)
+    Response_1_log.md         # Revision agent working notes (rec 1)
     Response_1.md             # Revision agent formal response (rec 1)
-    Reviewer_2_log.md         # Revision agent working notes (rec 2)
+    Response_2_log.md         # Revision agent working notes (rec 2)
     Response_2.md             # Revision agent formal response (rec 2)
     ...
   round_2/                    # (only if round 1 verdict was "Revise and Resubmit")
@@ -260,7 +260,7 @@ When AutoCritique produces a "Revise and Resubmit" verdict with `Recommendation_
 **Trigger:** Runs only when AutoCritique verdict contains `Verdict: Revise and Resubmit` and at least one `Recommendation_N.md` file exists.
 
 **Per-recommendation output:**
-- `Reviewer_{i}_log.md` — agent working notes / scratchpad
+- `Response_{i}_log.md` — agent working notes / scratchpad
 - `Response_{i}.md` — formal response documenting changes made, results, and assessment
 
 New/revised analysis files go into `analysis/` per the agent's judgment (new `analysis_{n+1}/` dirs or modifications to existing dirs).
@@ -410,7 +410,7 @@ Milestone patterns per call site:
 - **Visualization agent** — watches `visualizations/` for `Visualization_log.md`, `figure_*.py`, `figure_*.png`/`*.jpg`/`*.svg`, `caption_*.txt`
 - **Report agent** — watches `reports/` for `Reporter_log.md`, `*.md`
 - **AutoCritique agent** — watches `autocritique/round_{n}/` for `AutoCritique_log.md`, `AutoCritique_review.md`, `Recommendation_*.md`
-- **Revision agent** — watches `autocritique/round_{k}/` for `Reviewer_{i}_log.md`, `Response_{i}.md`
+- **Revision agent** — watches `autocritique/round_{k}/` for `Response_{i}_log.md`, `Response_{i}.md`
 - **Report revision agent** — watches `reports/` for `Report_revision_{k}.log`, `*_revision_{k}.md`
 - **Repo agent** — watches `repo/` for `README.md`, `paper/*.md`, `scripts/*.py`, `paper/*.png`/`*.svg`
 - **Notebook agent** — watches `repo/` for `notebooks/*.ipynb`, `notebooks/*.py`
@@ -574,7 +574,7 @@ autocritique/         # AutoCritique outputs (when enabled)
     AutoCritique_log.md       # Agent working notes
     AutoCritique_review.md    # Formal review with verdict
     Recommendation_*.md       # Actionable revision items (only on "Revise and Resubmit")
-    Reviewer_*_log.md         # Revision agent working notes (one per recommendation)
+    Response_*_log.md         # Revision agent working notes (one per recommendation)
     Response_*.md             # Revision agent formal responses (one per recommendation)
 repo/                 # Clean publishable repo (assembled by repo agent)
   README.md             # Project overview and codebase guide
