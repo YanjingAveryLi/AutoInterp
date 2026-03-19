@@ -278,7 +278,7 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
         try:
             # Find the config.yaml file (should be in the repo root)
-            config_path = Path(__file__).resolve().parents[1] / "config.yaml"
+            config_path = Path(__file__).resolve().parents[2] / "config.yaml"
 
             if not config_path.exists():
                 self.logger.error(f"Config file not found at {config_path}")
