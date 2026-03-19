@@ -103,6 +103,12 @@ from AutoInterp.src.questions.agent_prioritizer import (
     run_prioritizer_agent,
     read_prioritizer_outputs,
 )
+from AutoInterp.src.literature_review.agent_literature_review import (
+    load_literature_review_prompt_template,
+    _build_literature_review_prompt,
+    run_literature_review_agent,
+    read_literature_review_outputs,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -265,6 +271,8 @@ OPTIONS_SETTINGS = [
     {"key": "autocritique.enabled",          "label": "AutoCritique (peer review)",         "type": "bool", "help": "Run automated peer review after report generation"},
     {"key": "autocritique.max_revision_rounds", "label": "Max revision rounds",              "type": "int",  "help": "Max autocritique→revision cycles (0 = review only, no revisions)"},
     {"key": "notebook.enabled",               "label": "Notebook generation",               "type": "bool", "help": "Generate Jupyter notebook from finalized repo"},
+    {"key": "literature_review.enabled",       "label": "Literature review",                 "type": "bool", "help": "Run arXiv literature review after question prioritization"},
+    {"key": "literature_review.lit_count",    "label": "Number of papers read in lit. review", "type": "int", "help": "Target number of papers to find and summarize"},
 ]
 
 
@@ -3426,6 +3434,104 @@ async def streamlined_pipeline(framework: Dict[str, Any]) -> Dict[str, Any]:
             # Show first 80 chars of the selected question as summary
             summary = active_question[:80] + "..." if len(active_question) > 80 else active_question
             pipeline_ui.step_complete("question_prioritization", summary=summary)
+
+        # 2.5. Literature Review (arXiv search + paper summaries)
+        import shutil as _shutil_lr
+        _lr_cfg = config.get("literature_review", {})
+        _lr_enabled = _lr_cfg.get("enabled", False)
+        _lr_use_agent = _lr_cfg.get("use_agent", True)
+        _lr_provider = (config.get("llm", {}).get("provider") or "").lower()
+        _lr_timeout = _lr_cfg.get("agent_timeout", 4200)
+
+        if _lr_enabled and _lr_use_agent and _lr_provider in ("anthropic", "openai"):
+            _lr_cli = "claude" if _lr_provider == "anthropic" else "codex"
+            if _shutil_lr.which(_lr_cli):
+                if pipeline_ui:
+                    pipeline_ui.step_start("literature_review")
+                try:
+                    _lr_template = load_literature_review_prompt_template()
+                    _lr_lit_count = _lr_cfg.get("lit_count", 8)
+                    _lr_prompt = _build_literature_review_prompt(
+                        _lr_template, active_question, lit_count=_lr_lit_count
+                    )
+                    literature_dir = path_resolver.ensure_path("literature")
+
+                    # Progress callback for milestone polling
+                    def _lr_progress(msg: str) -> None:
+                        if pipeline_ui:
+                            pipeline_ui.step_progress("literature_review", msg)
+
+                    _lr_start = time.time()
+                    _lr_result = run_literature_review_agent(
+                        provider=_lr_provider,
+                        literature_dir=literature_dir,
+                        prompt_text=_lr_prompt,
+                        timeout=_lr_timeout,
+                        on_progress=_lr_progress,
+                        model=config.get("llm", {}).get("model", ""),
+                    )
+                    _lr_duration = time.time() - _lr_start
+
+                    _lr_outputs = read_literature_review_outputs(literature_dir)
+
+                    # Record the interaction in the dashboard
+                    if pipeline_ui:
+                        pipeline_ui.llm_call_complete(
+                            agent_name="literature_review_agent",
+                            display_name="Literature Review Agent",
+                            prompt=_lr_prompt[:2000] + "..." if len(_lr_prompt) > 2000 else _lr_prompt,
+                            system_message=None,
+                            response=_lr_outputs.get("literature_review_text") or "(no output)",
+                            model=f"{_lr_provider} CLI agent",
+                            provider=_lr_provider,
+                            temperature=0,
+                            max_tokens=0,
+                            duration_seconds=_lr_duration,
+                            step_id="literature_review",
+                        )
+
+                    if _lr_result["success"] and _lr_outputs["has_final_question"]:
+                        # Use the revised research question from the literature review
+                        active_question = _lr_outputs["final_question_text"]
+                        # Also overwrite prioritized_question.txt so downstream stages
+                        # (analysis, report) pick up the revised question
+                        prioritized_path = framework["question_manager"].storage_dir / "prioritized_question.txt"
+                        prioritized_path.write_text(active_question, encoding="utf-8")
+                        logger.info("Literature review revised the research question")
+                        print("[AUTOINTERP] Literature review complete — research question updated")
+                        _lr_summary = f"{len(_lr_outputs['downloaded_pdfs'])} papers, question revised"
+                    elif _lr_result["success"]:
+                        logger.info("Literature review complete but no Final_Research_Question.txt found")
+                        print("[AUTOINTERP] Literature review complete (no question revision)")
+                        _lr_summary = f"{len(_lr_outputs['downloaded_pdfs'])} papers"
+                    else:
+                        logger.warning("Literature review agent failed")
+                        print("[AUTOINTERP] Literature review agent failed; continuing with original question")
+                        _lr_summary = "agent failed"
+
+                    if pipeline_ui:
+                        pipeline_ui.step_complete("literature_review", summary=_lr_summary)
+
+                except Exception as e:
+                    logger.warning(f"Literature review agent failed: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    print("[AUTOINTERP] Literature review failed; continuing with original question")
+                    if pipeline_ui:
+                        pipeline_ui.step_failed("literature_review", error=str(e)[:120])
+            else:
+                print(f"[AUTOINTERP] Literature review enabled but '{_lr_cli}' CLI not found; skipping")
+                if pipeline_ui:
+                    pipeline_ui.step_skipped("literature_review", reason=f"CLI '{_lr_cli}' not found")
+        elif _lr_enabled and not _lr_use_agent:
+            if pipeline_ui:
+                pipeline_ui.step_skipped("literature_review", reason="agent mode disabled")
+        elif _lr_enabled:
+            if pipeline_ui:
+                pipeline_ui.step_skipped("literature_review", reason=f"provider '{_lr_provider}' not supported")
+        else:
+            if pipeline_ui:
+                pipeline_ui.step_skipped("literature_review", reason="disabled")
 
         # 3. Iterative Analysis and Evaluation
         if pipeline_ui:

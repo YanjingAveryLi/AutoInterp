@@ -64,6 +64,12 @@ from AutoInterp.src.notebook.agent_notebook import (
     run_notebook_agent,
     read_notebook_outputs,
 )
+from AutoInterp.src.literature_review.agent_literature_review import (
+    load_literature_review_prompt_template,
+    _build_literature_review_prompt,
+    run_literature_review_agent,
+    read_literature_review_outputs,
+)
 
 PACKAGE_ROOT = Path(__file__).resolve().parent
 PROJECTS_DIR = PACKAGE_ROOT / "projects"
@@ -76,6 +82,12 @@ STAGE_DEFS = {
         "required_inputs": [],
         "optional_inputs": ["literature"],
         "default_timeout": 300,
+    },
+    "litreview": {
+        "output_dirs": ["literature"],
+        "required_inputs": ["questions"],
+        "optional_inputs": ["literature"],
+        "default_timeout": 1800,
     },
     "viz": {
         "output_dirs": ["visualizations"],
@@ -164,6 +176,8 @@ def load_prompt_template(stage: str, prompt_path: Optional[str]) -> str:
     # Default templates
     if stage == "questions":
         return load_questions_prompt_template()
+    elif stage == "litreview":
+        return load_literature_review_prompt_template()
     elif stage == "viz":
         return load_visualization_prompt_template()
     elif stage == "report":
@@ -268,6 +282,14 @@ def build_prompt(
     """Build the final prompt text by dispatching to existing builder functions."""
     if stage == "questions":
         return _build_questions_prompt(template, task_description)
+    elif stage == "litreview":
+        # Read the prioritized question from the source project
+        pq_path = run_dir / "questions" / "prioritized_question.txt"
+        if pq_path.exists():
+            prioritized_question = pq_path.read_text(encoding="utf-8").strip()
+        else:
+            prioritized_question = task_description or "(no prioritized question found)"
+        return _build_literature_review_prompt(template, prioritized_question)
     elif stage == "viz":
         analysis_root = run_dir / "analysis"
         return _build_visualization_prompt(template, analysis_root)
@@ -292,6 +314,15 @@ def run_stage(
         return run_questions_agent(
             provider=provider,
             project_dir=run_dir,
+            prompt_text=prompt_text,
+            timeout=timeout,
+            model=model,
+        )
+    elif stage == "litreview":
+        literature_dir = run_dir / "literature"
+        return run_literature_review_agent(
+            provider=provider,
+            literature_dir=literature_dir,
             prompt_text=prompt_text,
             timeout=timeout,
             model=model,
@@ -340,6 +371,22 @@ def print_summary(stage: str, run_dir: Path, result: Dict[str, Any]) -> None:
             if outputs["title"]:
                 print(f"  Extracted title: {outputs['title']}")
         if not outputs["has_questions"] and not outputs["has_prioritized"]:
+            print("\n  (no output files found)")
+
+    elif stage == "litreview":
+        literature_dir = run_dir / "literature"
+        outputs = read_literature_review_outputs(literature_dir)
+        if outputs["has_final_question"]:
+            print(f"\n  Final_Research_Question.txt: {len(outputs['final_question_text'])} chars")
+        if outputs["has_literature_review"]:
+            print(f"  Literature_Review.md: {len(outputs['literature_review_text'])} chars")
+        if outputs["paper_summaries"]:
+            print(f"  Paper summaries: {len(outputs['paper_summaries'])}")
+            for fname, _ in outputs["paper_summaries"]:
+                print(f"    - {fname}")
+        if outputs["downloaded_pdfs"]:
+            print(f"  Downloaded PDFs: {len(outputs['downloaded_pdfs'])}")
+        if not outputs["has_final_question"] and not outputs["has_literature_review"]:
             print("\n  (no output files found)")
 
     elif stage == "viz":
@@ -393,7 +440,7 @@ Examples:
     )
     parser.add_argument(
         "stage",
-        choices=["questions", "viz", "report", "notebook"],
+        choices=["questions", "litreview", "viz", "report", "notebook"],
         help="Which agent stage to run",
     )
     parser.add_argument(

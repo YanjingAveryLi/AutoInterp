@@ -42,6 +42,7 @@ def _format_chars(text: Optional[str]) -> str:
 STEP_CONFIG = {
     "question_generation": {"label": "questions", "tab_id": "questions"},
     "question_prioritization": {"label": "prioritize", "tab_id": "prioritize"},
+    "literature_review": {"label": "lit review", "tab_id": "litreview"},
     "iterative_analysis": {"label": "analysis", "tab_id": "analysis"},
     "visualization": {"label": "visualization", "tab_id": "visualization"},
     "report_generation": {"label": "report", "tab_id": "report"},
@@ -464,6 +465,9 @@ a:hover {{ text-decoration: underline; }}
     --c-prioritize: #3d8bfd;
     --c-prioritize-bright: #6aabff;
     --c-prioritize-dim: #2d6abe;
+    --c-litreview: #ff9800;
+    --c-litreview-bright: #ffb74d;
+    --c-litreview-dim: #c47600;
     --c-analysis: #ebc934;
     --c-analysis-bright: #f2d95c;
     --c-analysis-dim: #b89c28;
@@ -503,12 +507,14 @@ a:hover {{ text-decoration: underline; }}
 /* Step tabs colored by status even when inactive */
 .tab-btn.step-done[data-tab="questions"] {{ color: var(--c-questions); }}
 .tab-btn.step-done[data-tab="prioritize"] {{ color: var(--c-prioritize); }}
+.tab-btn.step-done[data-tab="litreview"] {{ color: var(--c-litreview); }}
 .tab-btn.step-done[data-tab="analysis"] {{ color: var(--c-analysis); }}
 .tab-btn.step-done[data-tab="visualization"] {{ color: var(--c-visualization); }}
 .tab-btn.step-done[data-tab="report"] {{ color: var(--c-report); }}
 .tab-btn.step-done[data-tab="critique"] {{ color: var(--c-critique); }}
 .tab-btn.step-run[data-tab="questions"] {{ color: var(--c-questions); }}
 .tab-btn.step-run[data-tab="prioritize"] {{ color: var(--c-prioritize); }}
+.tab-btn.step-run[data-tab="litreview"] {{ color: var(--c-litreview); }}
 .tab-btn.step-run[data-tab="analysis"] {{ color: var(--c-analysis); }}
 .tab-btn.step-run[data-tab="visualization"] {{ color: var(--c-visualization); }}
 .tab-btn.step-run[data-tab="report"] {{ color: var(--c-report); }}
@@ -519,6 +525,8 @@ a:hover {{ text-decoration: underline; }}
 /* Active tab: brightest + colored underline */
 .tab-btn.step-done[data-tab="questions"].active {{ color: var(--c-questions-bright); border-bottom-color: var(--c-questions); }}
 .tab-btn.step-done[data-tab="prioritize"].active {{ color: var(--c-prioritize-bright); border-bottom-color: var(--c-prioritize); }}
+.tab-btn.step-done[data-tab="litreview"].active {{ color: var(--c-litreview-bright); border-bottom-color: var(--c-litreview); }}
+.tab-btn.step-run[data-tab="litreview"].active {{ color: var(--c-litreview-bright); border-bottom-color: var(--c-litreview); }}
 .tab-btn.step-done[data-tab="analysis"].active,
 .tab-btn.step-run[data-tab="analysis"].active {{ color: var(--c-analysis-bright); border-bottom-color: var(--c-analysis); }}
 .tab-btn.step-run[data-tab="questions"].active {{ color: var(--c-questions-bright); border-bottom-color: var(--c-questions); }}
@@ -556,6 +564,7 @@ td {{ padding: 6px 10px; border-bottom: 1px solid #1a1a1a; font-size: 13px; colo
 /* Step-colored links in overview */
 .step-link-questions {{ color: var(--c-questions); }}
 .step-link-prioritize {{ color: var(--c-prioritize); }}
+.step-link-litreview {{ color: var(--c-litreview); }}
 .step-link-analysis {{ color: var(--c-analysis); }}
 .step-link-visualization {{ color: var(--c-visualization); }}
 .step-link-report {{ color: var(--c-report); }}
@@ -588,6 +597,12 @@ td {{ padding: 6px 10px; border-bottom: 1px solid #1a1a1a; font-size: 13px; colo
 #tab-prioritize h2 {{ color: var(--c-prioritize); }}
 #tab-prioritize .card-pre.user {{ color: var(--c-prioritize-bright); }}
 #tab-prioritize .card-pre.asst {{ color: var(--c-prioritize-dim); }}
+
+#tab-litreview .card-head .name {{ color: var(--c-litreview-bright); }}
+#tab-litreview .card-head {{ border-left: 3px solid var(--c-litreview-dim); }}
+#tab-litreview h2 {{ color: var(--c-litreview); }}
+#tab-litreview .card-pre.user {{ color: var(--c-litreview-bright); }}
+#tab-litreview .card-pre.asst {{ color: var(--c-litreview-dim); }}
 
 #tab-analysis h2 {{ color: var(--c-analysis); }}
 .analysis-col .col-title {{ color: var(--col-color); }}

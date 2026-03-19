@@ -106,6 +106,7 @@ AGENT_DISPLAY_NAMES = {
     "repo_agent": "Repo Agent",
     "notebook_agent": "Notebook Agent",
     "questions_agent": "Questions Agent (Generate + Prioritize)",
+    "literature_review_agent": "Literature Review Agent",
 }
 
 
@@ -135,6 +136,7 @@ AGENT_STEP_MAP = {
     "repo_agent": "repo",
     "notebook_agent": "notebook",
     "questions_agent": "question_generation",
+    "literature_review_agent": "literature_review",
 }
 
 
@@ -151,6 +153,7 @@ def infer_step_id(agent_name: str) -> str:
 PIPELINE_STEPS = [
     ("question_generation", "Question Generation"),
     ("question_prioritization", "Question Prioritization"),
+    ("literature_review", "Literature Review"),
     ("iterative_analysis", "Iterative Analysis"),
     ("visualization", "Visualization"),
     ("report_generation", "Report Generation"),
