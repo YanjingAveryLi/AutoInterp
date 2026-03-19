@@ -6,7 +6,7 @@ import json
 import logging
 import random
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Union
 
 import networkx as nx
 
@@ -16,7 +16,7 @@ from .sampling import _has_download_url, _node_to_paper, build_literature_search
 logger = logging.getLogger(__name__)
 
 
-def _load_graph(graph_path: str | Path) -> nx.DiGraph:
+def _load_graph(graph_path: Union[str, Path]) -> nx.DiGraph:
     """Load citation graph from graph_state.json or GraphML/GEXF fallback."""
     path = Path(graph_path)
     if not path.exists():
@@ -224,8 +224,8 @@ def _retry_failed_downloads(
 
 
 def run_literature_search(
-    graph_path: str | Path,
-    output_dir: str | Path,
+    graph_path: Union[str, Path],
+    output_dir: Union[str, Path],
     seed_id: Optional[str] = None,
     s2_client: Optional[Any] = None,
     n_forward: int = 2,

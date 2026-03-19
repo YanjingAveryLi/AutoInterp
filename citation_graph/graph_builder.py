@@ -1,6 +1,7 @@
 """Wave expansion algorithm for building the citation graph."""
 
 from collections import defaultdict
+from typing import Optional
 
 import networkx as nx
 
@@ -210,7 +211,7 @@ def expand_wave(client: SemanticScholarClient, G: nx.DiGraph, wave_num: int,
     return new_ids
 
 
-def build_graph(client: SemanticScholarClient | None = None,
+def build_graph(client: Optional[SemanticScholarClient] = None,
                 max_waves: int = DEFAULT_MAX_WAVES,
                 min_overlap: int = DEFAULT_MIN_CITATION_OVERLAP,
                 overlap_growth: int = DEFAULT_OVERLAP_GROWTH,

@@ -1,6 +1,7 @@
 """Export and visualization utilities for the citation graph."""
 
 import os
+from typing import Optional
 
 import networkx as nx
 
@@ -80,7 +81,7 @@ def _sanitize_for_export(G: nx.DiGraph) -> nx.DiGraph:
     return H
 
 
-def export_graphml(G: nx.DiGraph, path: str | None = None) -> str:
+def export_graphml(G: nx.DiGraph, path: Optional[str] = None) -> str:
     """Export graph as GraphML."""
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     if path is None:
@@ -90,7 +91,7 @@ def export_graphml(G: nx.DiGraph, path: str | None = None) -> str:
     return path
 
 
-def export_gexf(G: nx.DiGraph, path: str | None = None) -> str:
+def export_gexf(G: nx.DiGraph, path: Optional[str] = None) -> str:
     """Export graph as GEXF (for Gephi)."""
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     if path is None:
@@ -100,7 +101,7 @@ def export_gexf(G: nx.DiGraph, path: str | None = None) -> str:
     return path
 
 
-def export_plot(G: nx.DiGraph, path: str | None = None) -> str:
+def export_plot(G: nx.DiGraph, path: Optional[str] = None) -> str:
     """Render a matplotlib visualization of the graph."""
     import matplotlib
     matplotlib.use("Agg")
@@ -158,7 +159,7 @@ def export_plot(G: nx.DiGraph, path: str | None = None) -> str:
     return path
 
 
-def export_interactive(G: nx.DiGraph, path: str | None = None) -> str:
+def export_interactive(G: nx.DiGraph, path: Optional[str] = None) -> str:
     """Render an interactive Plotly visualization with hover tooltips."""
     import plotly.graph_objects as go
 

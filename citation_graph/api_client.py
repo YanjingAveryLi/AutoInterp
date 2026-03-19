@@ -7,6 +7,8 @@ import random
 import time
 from urllib.parse import urlencode
 
+from typing import Dict, List, Optional, Union
+
 import requests
 
 from config import (
@@ -40,7 +42,7 @@ class SemanticScholarClient:
 
     # --- Cache helpers ---
 
-    def _cache_key(self, method: str, url: str, params: dict | None, body: str | None) -> str:
+    def _cache_key(self, method: str, url: str, params: Optional[dict], body: Optional[str]) -> str:
         raw = f"{method}|{url}|{json.dumps(params, sort_keys=True)}|{body or ''}"
         return hashlib.sha256(raw.encode()).hexdigest()
 
@@ -68,8 +70,8 @@ class SemanticScholarClient:
         if elapsed < self.rate_limit:
             time.sleep(self.rate_limit - elapsed)
 
-    def _request(self, method: str, url: str, params: dict | None = None,
-                 json_body=None, cache: bool = True) -> dict | list | None:
+    def _request(self, method: str, url: str, params: Optional[dict] = None,
+                 json_body=None, cache: bool = True) -> Optional[Union[dict, list]]:
         body_str = json.dumps(json_body, sort_keys=True) if json_body else None
         if cache:
             key = self._cache_key(method, url, params, body_str)
@@ -113,12 +115,12 @@ class SemanticScholarClient:
 
     # --- Paper lookup ---
 
-    def get_paper(self, paper_id: str, fields: str = PAPER_FIELDS) -> dict | None:
+    def get_paper(self, paper_id: str, fields: str = PAPER_FIELDS) -> Optional[dict]:
         """Fetch a single paper by S2 ID, ARXIV:id, DOI:id, or URL:url."""
         url = f"{S2_API_BASE}/paper/{paper_id}"
         return self._request("GET", url, params={"fields": fields})
 
-    def search_paper_by_title(self, title: str, fields: str = PAPER_FIELDS) -> dict | None:
+    def search_paper_by_title(self, title: str, fields: str = PAPER_FIELDS) -> Optional[dict]:
         """Fallback: use /paper/search/match for title-based lookup."""
         url = f"{S2_API_BASE}/paper/search/match"
         params = {"query": title, "fields": fields}
@@ -129,7 +131,7 @@ class SemanticScholarClient:
                 return matches[0]
         return None
 
-    def resolve_paper(self, paper_id: str | None, title: str, fields: str = PAPER_FIELDS) -> dict | None:
+    def resolve_paper(self, paper_id: Optional[str], title: str, fields: str = PAPER_FIELDS) -> Optional[dict]:
         """Try ID-based lookup first, then fall back to title match."""
         if paper_id:
             result = self.get_paper(paper_id, fields=fields)

@@ -7,7 +7,7 @@ import logging
 import shutil
 import subprocess
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable, Optional, Union
 
 from AutoInterp.src.core.agent_subprocess import (
     MilestonePattern,
@@ -62,7 +62,7 @@ def _get_agent_command(provider: str, prompt_text: str, literature_dir: Path, mo
 
 def run_agent_question_generation(
     provider: str,
-    literature_dir: str | Path,
+    literature_dir: Union[str, Path],
     prompt_template: str,
     timeout: int = 600,
     on_progress: Optional[Callable[[str], None]] = None,
