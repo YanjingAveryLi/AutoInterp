@@ -1,5 +1,0 @@
-# Persona prompt for the Analysis Agent (agent mode).
-# Write your persona instructions below. They will be prepended to the standard prompt.
-# Leave empty for default behavior (no persona).
-# Example: "Think like a complex systems theorist. Consider emergence and holism."
-persona: ""
