@@ -42,3 +42,6 @@ persona_prompts/
 
 # Helper script to be deleted
 rebuild_notebook_from_data.py
+
+# Local SLURM/sbatch scripts
+sbatch/
