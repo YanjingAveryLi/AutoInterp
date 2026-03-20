@@ -202,6 +202,7 @@ class PipelineUI:
         self.pipeline_start_time: Optional[datetime] = None
         self.steps: Dict[str, PipelineStep] = {}
         self._active_status = None  # rich console.status context manager
+        self._project_id: str = self.project_dir.name
 
         # Initialize steps
         for step_id, display_name in PIPELINE_STEPS:
@@ -483,6 +484,7 @@ class PipelineUI:
     def update_project_dir(self, new_dir: Path) -> None:
         """Handle project directory rename mid-pipeline."""
         self.project_dir = Path(new_dir)
+        self._project_id = self.project_dir.name
         self.dashboard_path = self.project_dir / "dashboard.html"
         if self.dashboard_enabled:
             self._write_dashboard()
@@ -605,7 +607,12 @@ class PipelineUI:
                 task_name=self.task_name or "AutoInterp Pipeline",
                 timestamp=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 tab_buttons=render_tab_buttons(steps_data),
-                tab_content=render_tab_content(steps_data, self.task_name),
+                tab_content=render_tab_content(
+                    steps_data,
+                    self.task_name,
+                    pipeline_start_time=self.pipeline_start_time,
+                    project_id=self._project_id,
+                ),
             )
 
             # Atomic write: write to temp file then rename

@@ -7,6 +7,7 @@ content (tab buttons, LLM cards, analysis columns).
 """
 
 import html as _html
+import re
 from collections import OrderedDict
 from datetime import datetime
 from typing import List, Dict, Any, Optional
@@ -48,7 +49,7 @@ STEP_CONFIG = {
     "report_generation": {"label": "report", "tab_id": "report"},
     "autocritique": {"label": "critique", "tab_id": "critique"},
     "revision": {"label": "revision", "tab_id": "revision"},
-    "report_revision": {"label": "report rev", "tab_id": "report_revision"},
+    "report_revision": {"label": "revised report", "tab_id": "report_revision"},
     "repo": {"label": "repo", "tab_id": "repo"},
     "notebook": {"label": "notebook", "tab_id": "notebook"},
 }
@@ -92,12 +93,9 @@ def render_tab_buttons(steps: List[Dict[str, Any]]) -> str:
         label = cfg["label"]
         css_cls, icon = _STATUS_CSS.get(step["status"], ("step-pend", "-"))
 
-        count = len(step.get("llm_interactions", []))
-        badge = f' <span class="badge">{count}</span>' if count > 0 else ""
-
         parts.append(
             f'<button class="tab-btn {css_cls}" data-tab="{escape_html(tab_id)}">'
-            f'<span class="status-icon">{icon}</span>{escape_html(label)}{badge}'
+            f'<span class="status-icon">{icon}</span>{escape_html(label)}'
             f'</button>'
         )
     return "\n".join(parts)
@@ -274,30 +272,155 @@ def render_analysis_columns(interactions: List[Dict[str, Any]]) -> str:
 # Progress log renderer
 # ---------------------------------------------------------------------------
 
-def render_output_card(output_file: Dict[str, Any]) -> str:
-    """Render a single output file as a collapsible card."""
-    filename = escape_html(output_file.get("filename", ""))
-    content = escape_html(output_file.get("content", ""))
-    chars = _format_chars(output_file.get("content"))
+def _format_study_title(task_name: str, project_id: str) -> str:
+    """Format a human-readable study title from task_name or project_id.
 
+    Strips trailing _YYYY-MM-DDTHH-MM-SS timestamp, strips REJECT_ prefix,
+    replaces underscores with spaces, and lowercases.
+    """
+    raw = project_id or task_name
+    if not raw:
+        return ""
+    # Strip trailing timestamp like _2026-03-12T18-14-54
+    raw = re.sub(r'_\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}$', '', raw)
+    # Strip REJECT_ prefix
+    raw = re.sub(r'^REJECT_', '', raw)
+    # Replace underscores with spaces
+    raw = raw.replace('_', ' ')
+    return raw.lower()
+
+
+def _render_markdown(text: str) -> str:
+    """Render markdown text to HTML. Falls back to escaped <pre> if markdown library unavailable."""
+    try:
+        import markdown
+        return markdown.markdown(text, extensions=['tables', 'fenced_code', 'toc'])
+    except ImportError:
+        return f'<pre class="card-pre asst">{escape_html(text)}</pre>'
+
+
+def _extract_round_number(filename: str) -> int:
+    """Extract round number from filenames like 'AutoCritique_review.md (round 2)'. Returns 1 if not found."""
+    m = re.search(r'\(round\s+(\d+)\)', filename)
+    return int(m.group(1)) if m else 1
+
+
+def render_round_columns(
+    output_files: List[Dict[str, Any]],
+    step_id: str,
+    color_var: str,
+    color_bright_var: str,
+) -> str:
+    """Group output files by round number and render as horizontal columns."""
+    if not output_files:
+        return ""
+
+    # Group by round
+    rounds: Dict[int, List[Dict[str, Any]]] = {}
+    for of in output_files:
+        rn = _extract_round_number(of.get("filename", ""))
+        rounds.setdefault(rn, []).append(of)
+
+    columns = []
+    for rn in sorted(rounds.keys()):
+        cards = "\n".join(
+            render_output_card(of, step_id=step_id, collapsed=True) for of in rounds[rn]
+        )
+        columns.append(
+            f'<div class="round-col" style="border-color: {color_var};">'
+            f'<h3 style="color: {color_bright_var};">round {rn}</h3>'
+            f'{cards}'
+            f'</div>'
+        )
+
+    return f'<div class="round-row">{"".join(columns)}</div>'
+
+
+_IMAGE_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.svg'}
+
+
+def render_output_card(
+    output_file: Dict[str, Any],
+    step_id: str = "",
+    collapsed: bool = False,
+) -> str:
+    """Render a single output file as a collapsible card.
+
+    - Image files (.png, .jpg, .svg) in visualization step render as <img> tags.
+    - Markdown files in report_generation/report_revision steps render as formatted HTML.
+    - Other files render as <pre> text blocks.
+    """
+    filename = output_file.get("filename", "")
+    content_raw = output_file.get("content", "")
+    chars = _format_chars(content_raw)
+    filename_escaped = escape_html(filename)
+
+    open_attr = "" if collapsed else " open"
+
+    # Determine file extension
+    import os.path
+    _, ext = os.path.splitext(filename)
+    ext = ext.lower()
+
+    # Image files: render as <img>
+    if ext in _IMAGE_EXTENSIONS:
+        # content is a relative path like "visualizations/figure_1.png"
+        img_src = escape_html(content_raw) if content_raw else escape_html(filename)
+        return f'''
+    <div class="card viz-figure">
+        <div class="card-head">
+            <span class="name">{filename_escaped}</span>
+        </div>
+        <details class="card-section"{open_attr}>
+            <summary>FIGURE</summary>
+            <div style="padding: 10px 12px; background: #060606;">
+                <img src="{img_src}" alt="{filename_escaped}">
+            </div>
+        </details>
+    </div>'''
+
+    # Markdown files in report steps: render as formatted HTML
+    if ext == '.md' and step_id in ('report_generation', 'report_revision'):
+        rendered = _render_markdown(content_raw)
+        return f'''
+    <div class="card">
+        <div class="card-head">
+            <span class="name">{filename_escaped}</span>
+            <span>{chars} chars</span>
+        </div>
+        <details class="card-section"{open_attr}>
+            <summary>REPORT</summary>
+            <div class="rendered-md">{rendered}</div>
+        </details>
+    </div>'''
+
+    # Default: plain text
+    content = escape_html(content_raw)
     return f'''
     <div class="card">
         <div class="card-head">
-            <span class="name">{filename}</span>
+            <span class="name">{filename_escaped}</span>
             <span>{chars} chars</span>
         </div>
-        <details class="card-section" open>
+        <details class="card-section"{open_attr}>
             <summary>CONTENT</summary>
             <pre class="card-pre asst">{content}</pre>
         </details>
     </div>'''
 
 
-def render_output_cards(output_files: List[Dict[str, Any]]) -> str:
+def render_output_cards(
+    output_files: List[Dict[str, Any]],
+    step_id: str = "",
+    collapsed: bool = False,
+) -> str:
     """Render all output file cards for a step."""
     if not output_files:
         return ""
-    return "\n".join(render_output_card(of) for of in output_files)
+    return "\n".join(
+        render_output_card(of, step_id=step_id, collapsed=collapsed)
+        for of in output_files
+    )
 
 
 def render_progress_log(
@@ -310,8 +433,11 @@ def render_progress_log(
 
     entries = []
     for pm in progress_messages:
+        msg_text = pm.get("message", "")
+        if "Still running..." in msg_text:
+            continue
         ts = pm.get("timestamp")
-        msg = escape_html(pm.get("message", ""))
+        msg = escape_html(msg_text)
         offset_str = ""
         if step_start_time and ts:
             delta = (ts - step_start_time).total_seconds()
@@ -322,6 +448,9 @@ def render_progress_log(
             f'<span class="progress-msg">{msg}</span>'
             f'</div>'
         )
+
+    if not entries:
+        return ""
 
     return (
         '<div class="progress-log">'
@@ -334,17 +463,48 @@ def render_progress_log(
 # Tab content renderer
 # ---------------------------------------------------------------------------
 
-def render_tab_content(steps: List[Dict[str, Any]], task_name: str = "") -> str:
+def render_tab_content(
+    steps: List[Dict[str, Any]],
+    task_name: str = "",
+    pipeline_start_time: Optional[datetime] = None,
+    project_id: str = "",
+) -> str:
     """Render the content for all tabs."""
     parts = []
 
     # -- Overview tab --
-    total_calls = sum(len(s.get("llm_interactions", [])) for s in steps)
-    total_duration = sum(
-        (i.get("duration_seconds") or 0)
-        for s in steps
-        for i in s.get("llm_interactions", [])
-    )
+
+    # Total run time (wall clock)
+    if pipeline_start_time:
+        # Use end_time of the last completed/failed step, or now
+        last_end = None
+        for s in steps:
+            et = s.get("end_time")
+            if et and (last_end is None or et > last_end):
+                last_end = et
+        if last_end is None:
+            last_end = datetime.now()
+        total_wall = (last_end - pipeline_start_time).total_seconds()
+    else:
+        total_wall = 0.0
+
+    # Current step: find the first running step, or show COMPLETE
+    current_step_html = '<span style="color: #fff;">COMPLETE</span>'
+    for s in steps:
+        if s["status"] == "running":
+            cfg = STEP_CONFIG.get(s["step_id"], {"label": s["step_id"], "tab_id": s["step_id"]})
+            tab_id = cfg["tab_id"]
+            current_step_html = f'<span style="color: var(--c-{tab_id});">{escape_html(cfg["label"])}</span>'
+            break
+    else:
+        # Check if any step is not pending/skipped (pipeline may not have completed fully)
+        any_active = any(s["status"] in ("completed", "running", "failed") for s in steps)
+        if not any_active:
+            current_step_html = '<span style="color: #555;">not started</span>'
+
+    # Study title
+    study_title = _format_study_title(task_name, project_id)
+    study_title_html = f'<div class="study-title">{escape_html(study_title)}</div>' if study_title else ""
 
     overview_rows = ""
     for step in steps:
@@ -360,11 +520,6 @@ def render_tab_content(steps: List[Dict[str, Any]], task_name: str = "") -> str:
         else:
             link_cls = "step-link step-link-pend"
 
-        n_calls = len(step.get("llm_interactions", []))
-        step_dur = sum(
-            (i.get("duration_seconds") or 0) for i in step.get("llm_interactions", [])
-        )
-        summary = escape_html(step.get("summary", "")) or "&mdash;"
         elapsed = ""
         if step.get("start_time") and step.get("end_time"):
             elapsed = _format_duration((step["end_time"] - step["start_time"]).total_seconds())
@@ -375,22 +530,19 @@ def render_tab_content(steps: List[Dict[str, Any]], task_name: str = "") -> str:
         <tr>
             <td><a class="{link_cls}" href="#" data-tab="{escape_html(tab_id)}">{escape_html(label)}</a></td>
             <td><span class="st {status_cls}">{status_text}</span></td>
-            <td>{n_calls}</td>
-            <td>{_format_duration(step_dur)}</td>
             <td>{elapsed}</td>
-            <td>{summary}</td>
         </tr>'''
 
     parts.append(f'''
     <div class="tab-content active" id="tab-overview">
         <h2>overview</h2>
+        {study_title_html}
         <div class="stats">
-            <div class="stat"><div class="stat-val">{total_calls}</div><div class="stat-lbl">llm calls</div></div>
-            <div class="stat"><div class="stat-val">{_format_duration(total_duration)}</div><div class="stat-lbl">llm time</div></div>
-            <div class="stat"><div class="stat-val">{len(steps)}</div><div class="stat-lbl">steps</div></div>
+            <div class="stat"><div class="stat-val">{_format_duration(total_wall)}</div><div class="stat-lbl">run time</div></div>
+            <div class="stat"><div class="stat-val">{current_step_html}</div><div class="stat-lbl">current step</div></div>
         </div>
         <table>
-            <thead><tr><th>step</th><th>status</th><th>calls</th><th>llm time</th><th>wall time</th><th>summary</th></tr></thead>
+            <thead><tr><th>step</th><th>status</th><th>run time</th></tr></thead>
             <tbody>{overview_rows}</tbody>
         </table>
     </div>''')
@@ -407,8 +559,20 @@ def render_tab_content(steps: List[Dict[str, Any]], task_name: str = "") -> str:
         # Render progress log (shown above main content when present)
         progress_html = render_progress_log(progress_msgs, step.get("start_time"))
 
-        # Render output file cards (shown after progress, before LLM cards)
-        output_html = render_output_cards(output_files)
+        # Critique and revision: group output files by round in horizontal columns
+        if step_id == "autocritique" and output_files:
+            output_html = render_round_columns(
+                output_files, step_id,
+                "var(--c-critique)", "var(--c-critique-bright)",
+            )
+        elif step_id == "revision" and output_files:
+            output_html = render_round_columns(
+                output_files, step_id,
+                "var(--c-revision)", "var(--c-revision-bright)",
+            )
+        else:
+            # Regular output cards
+            output_html = render_output_cards(output_files, step_id=step_id)
 
         if step_id == "iterative_analysis":
             content = render_analysis_columns(interactions)
@@ -480,6 +644,15 @@ a:hover {{ text-decoration: underline; }}
     --c-critique: #ab47bc;
     --c-critique-bright: #ce93d8;
     --c-critique-dim: #7b1fa2;
+    --c-revision: #e65100;
+    --c-revision-bright: #ff8a50;
+    --c-revision-dim: #ac3900;
+    --c-report_revision: #e57373;
+    --c-report_revision-bright: #ff8a80;
+    --c-report_revision-dim: #c62828;
+    --c-repo: #c6a700;
+    --c-repo-bright: #e6c300;
+    --c-repo-dim: #9e8600;
     --c-notebook: #5c6bc0;
     --c-notebook-bright: #7986cb;
     --c-notebook-dim: #3949ab;
@@ -519,6 +692,12 @@ a:hover {{ text-decoration: underline; }}
 .tab-btn.step-run[data-tab="visualization"] {{ color: var(--c-visualization); }}
 .tab-btn.step-run[data-tab="report"] {{ color: var(--c-report); }}
 .tab-btn.step-run[data-tab="critique"] {{ color: var(--c-critique); }}
+.tab-btn.step-done[data-tab="revision"] {{ color: var(--c-revision); }}
+.tab-btn.step-run[data-tab="revision"] {{ color: var(--c-revision); }}
+.tab-btn.step-done[data-tab="report_revision"] {{ color: var(--c-report_revision); }}
+.tab-btn.step-run[data-tab="report_revision"] {{ color: var(--c-report_revision); }}
+.tab-btn.step-done[data-tab="repo"] {{ color: var(--c-repo); }}
+.tab-btn.step-run[data-tab="repo"] {{ color: var(--c-repo); }}
 .tab-btn.step-done[data-tab="notebook"] {{ color: var(--c-notebook); }}
 .tab-btn.step-run[data-tab="notebook"] {{ color: var(--c-notebook); }}
 .tab-btn.step-pend {{ color: #555; }}
@@ -537,10 +716,15 @@ a:hover {{ text-decoration: underline; }}
 .tab-btn.step-done[data-tab="visualization"].active {{ color: var(--c-visualization-bright); border-bottom-color: var(--c-visualization); }}
 .tab-btn.step-done[data-tab="report"].active {{ color: var(--c-report-bright); border-bottom-color: var(--c-report); }}
 .tab-btn.step-done[data-tab="critique"].active {{ color: var(--c-critique-bright); border-bottom-color: var(--c-critique); }}
+.tab-btn.step-done[data-tab="revision"].active {{ color: var(--c-revision-bright); border-bottom-color: var(--c-revision); }}
+.tab-btn.step-run[data-tab="revision"].active {{ color: var(--c-revision-bright); border-bottom-color: var(--c-revision); }}
+.tab-btn.step-done[data-tab="report_revision"].active {{ color: var(--c-report_revision-bright); border-bottom-color: var(--c-report_revision); }}
+.tab-btn.step-run[data-tab="report_revision"].active {{ color: var(--c-report_revision-bright); border-bottom-color: var(--c-report_revision); }}
+.tab-btn.step-done[data-tab="repo"].active {{ color: var(--c-repo-bright); border-bottom-color: var(--c-repo); }}
+.tab-btn.step-run[data-tab="repo"].active {{ color: var(--c-repo-bright); border-bottom-color: var(--c-repo); }}
 .tab-btn.step-done[data-tab="notebook"].active {{ color: var(--c-notebook-bright); border-bottom-color: var(--c-notebook); }}
 .tab-btn.step-run[data-tab="notebook"].active {{ color: var(--c-notebook-bright); border-bottom-color: var(--c-notebook); }}
 .tab-btn .status-icon {{ margin-right: 4px; }}
-.badge {{ color: #888; font-size: 12px; margin-left: 4px; }}
 
 .main {{ padding: 20px; max-width: 1400px; margin: 0 auto; }}
 .tab-content {{ display: none; }}
@@ -569,6 +753,9 @@ td {{ padding: 6px 10px; border-bottom: 1px solid #1a1a1a; font-size: 13px; colo
 .step-link-visualization {{ color: var(--c-visualization); }}
 .step-link-report {{ color: var(--c-report); }}
 .step-link-critique {{ color: var(--c-critique); }}
+.step-link-revision {{ color: var(--c-revision); }}
+.step-link-report_revision {{ color: var(--c-report_revision); }}
+.step-link-repo {{ color: var(--c-repo); }}
 .step-link-notebook {{ color: var(--c-notebook); }}
 .step-link-pend {{ color: #555; }}
 .step-link:hover {{ text-decoration: underline; }}
@@ -580,7 +767,7 @@ td {{ padding: 6px 10px; border-bottom: 1px solid #1a1a1a; font-size: 13px; colo
 .card-section {{ border-top: 1px solid #1a1a1a; }}
 .card-section summary {{ padding: 6px 12px; cursor: pointer; font-size: 12px; color: #999; }}
 .card-section summary:hover {{ color: #ccc; }}
-.card-pre {{ padding: 10px 12px; white-space: pre-wrap; word-wrap: break-word; font-family: inherit; font-size: 12px; line-height: 1.5; background: #060606; max-height: 600px; overflow-y: auto; }}
+.card-pre {{ padding: 10px 12px; white-space: pre-wrap; word-wrap: break-word; font-family: inherit; font-size: 12px; line-height: 1.5; background: #060606; }}
 
 /* SYSTEM text always muted */
 .card-pre.sys {{ color: #777; }}
@@ -630,6 +817,24 @@ td {{ padding: 6px 10px; border-bottom: 1px solid #1a1a1a; font-size: 13px; colo
 #tab-critique .card-pre.user {{ color: var(--c-critique-bright); }}
 #tab-critique .card-pre.asst {{ color: var(--c-critique-dim); }}
 
+#tab-revision h2 {{ color: var(--c-revision); }}
+#tab-revision .card-head .name {{ color: var(--c-revision-bright); }}
+#tab-revision .card-head {{ border-left: 3px solid var(--c-revision-dim); }}
+#tab-revision .card-pre.user {{ color: var(--c-revision-bright); }}
+#tab-revision .card-pre.asst {{ color: var(--c-revision-dim); }}
+
+#tab-report_revision h2 {{ color: var(--c-report_revision); }}
+#tab-report_revision .card-head .name {{ color: var(--c-report_revision-bright); }}
+#tab-report_revision .card-head {{ border-left: 3px solid var(--c-report_revision-dim); }}
+#tab-report_revision .card-pre.user {{ color: var(--c-report_revision-bright); }}
+#tab-report_revision .card-pre.asst {{ color: var(--c-report_revision-dim); }}
+
+#tab-repo h2 {{ color: var(--c-repo); }}
+#tab-repo .card-head .name {{ color: var(--c-repo-bright); }}
+#tab-repo .card-head {{ border-left: 3px solid var(--c-repo-dim); }}
+#tab-repo .card-pre.user {{ color: var(--c-repo-bright); }}
+#tab-repo .card-pre.asst {{ color: var(--c-repo-dim); }}
+
 #tab-notebook h2 {{ color: var(--c-notebook); }}
 #tab-notebook .card-head .name {{ color: var(--c-notebook-bright); }}
 #tab-notebook .card-head {{ border-left: 3px solid var(--c-notebook-dim); }}
@@ -660,6 +865,35 @@ td {{ padding: 6px 10px; border-bottom: 1px solid #1a1a1a; font-size: 13px; colo
 .progress-entry {{ display: flex; gap: 12px; padding: 2px 0; font-size: 12px; line-height: 1.5; }}
 .progress-ts {{ color: #555; min-width: 50px; text-align: right; flex-shrink: 0; }}
 .progress-msg {{ color: #888; }}
+
+/* Study title */
+.study-title {{ color: #ddd; font-size: 16px; margin-bottom: 16px; font-weight: normal; }}
+
+/* Visualization figures */
+.viz-figure img {{ max-width: 100%; border: 1px solid #222; }}
+
+/* Rendered markdown */
+.rendered-md {{ padding: 10px 12px; font-size: 13px; line-height: 1.7; color: #ccc; }}
+.rendered-md h1 {{ font-size: 18px; color: #ddd; margin: 20px 0 10px 0; font-weight: bold; }}
+.rendered-md h2 {{ font-size: 16px; color: #ddd; margin: 18px 0 8px 0; font-weight: bold; }}
+.rendered-md h3 {{ font-size: 14px; color: #ddd; margin: 14px 0 6px 0; font-weight: bold; }}
+.rendered-md h4, .rendered-md h5, .rendered-md h6 {{ font-size: 13px; color: #ccc; margin: 12px 0 4px 0; font-weight: bold; }}
+.rendered-md p {{ margin: 8px 0; }}
+.rendered-md ul, .rendered-md ol {{ margin: 8px 0; padding-left: 24px; }}
+.rendered-md li {{ margin: 2px 0; }}
+.rendered-md code {{ background: #1a1a1a; padding: 1px 4px; font-size: 12px; }}
+.rendered-md pre {{ background: #0a0a0a; padding: 10px 12px; overflow-x: auto; margin: 8px 0; }}
+.rendered-md pre code {{ background: none; padding: 0; }}
+.rendered-md table {{ width: 100%; border-collapse: collapse; margin: 10px 0; }}
+.rendered-md th {{ text-align: left; padding: 6px 10px; font-weight: bold; font-size: 12px; color: #aaa; border-bottom: 1px solid #333; }}
+.rendered-md td {{ padding: 6px 10px; border-bottom: 1px solid #1a1a1a; font-size: 12px; color: #bbb; }}
+.rendered-md blockquote {{ border-left: 3px solid #333; padding-left: 12px; color: #999; margin: 8px 0; }}
+.rendered-md img {{ max-width: 100%; }}
+
+/* Round-based grouping (critique, revision) */
+.round-row {{ display: flex; gap: 12px; overflow-x: auto; padding-bottom: 8px; align-items: flex-start; }}
+.round-col {{ min-width: 400px; max-width: 600px; flex-shrink: 0; border: 1px solid #222; padding: 8px; }}
+.round-col h3 {{ font-size: 13px; color: #999; margin-bottom: 8px; font-weight: normal; text-transform: uppercase; letter-spacing: 1px; }}
 
 .footer {{ padding: 16px 20px; color: #555; font-size: 12px; border-top: 1px solid #1a1a1a; margin-top: 40px; }}
 </style>

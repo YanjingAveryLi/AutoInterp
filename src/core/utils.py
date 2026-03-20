@@ -178,7 +178,6 @@ def setup_console_logging_to_file(project_path: Union[str, Path]) -> None:
         sys.stdout = TeeOutput(sys.stdout, console_log_file)
         sys.stderr = TeeOutput(sys.stderr, console_log_file)
         
-        print(f"[AUTOINTERP] Console output logging enabled: {console_log_path}")
         
     except Exception as e:
         print(f"[AUTOINTERP] Warning: Could not set up console logging: {e}")

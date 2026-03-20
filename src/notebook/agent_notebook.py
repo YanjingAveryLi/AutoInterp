@@ -127,7 +127,7 @@ def run_notebook_agent(
     provider: str,
     project_dir: Path,
     prompt_text: str,
-    timeout: int = 900,
+    timeout: int = 4200,
     on_progress: Optional[Callable[[str], None]] = None,
     model: str = "",
 ) -> Dict[str, Any]:

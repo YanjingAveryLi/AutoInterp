@@ -110,4 +110,35 @@ SEED_PAPERS = [
         "title": "Tell me about yourself: LLMs are aware of their learned behaviors",
         "group": "academic",
     },
+    # --- Representations & steering ---
+    {
+        "id": "ARXIV:2406.11717",
+        "title": "Refusal in Language Models Is Mediated by a Single Direction",
+        "group": "academic",
+    },
+    {
+        "id": "ARXIV:2311.03658",
+        "title": "The Linear Representation Hypothesis and the Geometry of Large Language Models",
+        "group": "academic",
+    },
+    {
+        "id": "ARXIV:2308.10248",
+        "title": "Steering Language Models With Activation Engineering",
+        "group": "academic",
+    },
+    {
+        "id": "ARXIV:2502.02013",
+        "title": "Layer by Layer: Uncovering Hidden Representations in Language Models",
+        "group": "academic",
+    },
+    {
+        "id": "ARXIV:2405.07987",
+        "title": "The Platonic Representation Hypothesis",
+        "group": "academic",
+    },
+    {
+        "id": "ARXIV:2601.01828",
+        "title": "Emergent Introspective Awareness in Large Language Models",
+        "group": "academic",
+    },
 ]

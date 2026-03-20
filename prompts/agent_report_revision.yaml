@@ -29,6 +29,8 @@ prompt_template: |
 
   9. Keep working on the report until it fully reflects the most current analyses and figures. Feel free to reference files in ./analysis/ or ./visualizations/ if you need to refresh your memory.
 
+  The final report should resemble an academic research paper, not a bulleted list of analyses. Please do not use bold in your text. 
+  
   When the new revised report markdown file is complete, you are done. Great job!
 
 

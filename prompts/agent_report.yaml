@@ -10,7 +10,7 @@ prompt_template: |
 
   To learn the necessary details, you must explore ./analysis and ./visualizations. In ./analysis/background, you will find details about the research question. In each ./analysis/analysis_{n}, you will find the scripts and the results of each stage of analysis. In the ./visualizations directory, you will find the finalized figures.
 
-  Not all the analyses or all figures need to **necessarily** be included in the final report. Include those that are relevant and make a coherent and convincing case for the central research claim. Additionally, figures of analyses could be included in a different order if this would clarify the argument. But if you do change the order, make sure their numbering in the report reflect their order of appearance in the report. That is, Figure 1 is first, followed by Figure 2, etc.
+  Not all the analyses or all figures need to **necessarily** be included in the final report. Include those that are relevant and make a coherent and convincing case for the central research claim. Additionally, figures of analyses could be included in a different order if this would clarify the argument. But if you do change the order, make sure their numbering in the report reflect their order of appearance in the report. That is, Figure 1 is first, followed by Figure 2, etc. Do not bold any text.
 
   Follow the following procedure:
 

@@ -1,8 +1,8 @@
 # AI Interpretability Citation Graph
 
-Builds a citation graph of AI interpretability research starting from 20 seed papers (Distill Circuits thread, Anthropic blog posts, key academic papers) and expanding outward via the [Semantic Scholar API](https://www.semanticscholar.org/product/api) to discover densely connected related work.
+Builds a citation graph of AI interpretability research starting from 26 seed papers (Distill Circuits thread, Anthropic blog posts, key academic papers) and expanding outward via the [Semantic Scholar API](https://www.semanticscholar.org/product/api) to discover densely connected related work.
 
-A completed 4-wave uncapped build produces **1,003 papers and 8,727 citation edges** in a single connected component.
+A completed 4-wave uncapped build produces **563 papers and 4,654 citation edges** in a single connected component.
 
 ## How it works
 
@@ -85,7 +85,7 @@ The graph starts from 20 papers across three groups:
 ```
 cli.py              CLI entry point (build / stats / export subcommands)
 config.py           Constants, API URLs, rate limits, expansion parameters
-seeds.py            Curated list of 20 seed papers
+seeds.py            Curated list of 26 seed papers
 api_client.py       S2 API client with disk caching, rate limiting, retries
 graph_builder.py    Wave expansion algorithm (NetworkX DiGraph)
 persistence.py      JSON save/load for graph state (atomic writes)

@@ -68,9 +68,9 @@ Each paper in the citation graph stores download metadata to avoid live API call
 
 | Source | Coverage | Method |
 |--------|----------|--------|
-| `arxiv_id` | 969/1003 (96.6%) | Construct `https://arxiv.org/pdf/{id}.pdf` directly |
-| `open_access_url` | 29/1003 (2.9%) | Stored URL from S2, Distill, Springer OA, Frontiers, ACL, bioRxiv, etc. |
-| No URL | 5/1003 (0.5%) | Paywalled (Elsevier/IEEE) — excluded from sampling |
+| `arxiv_id` | 530/563 (94.1%) | Construct `https://arxiv.org/pdf/{id}.pdf` directly |
+| `open_access_url` | 10/563 (1.8%) | Stored URL from S2, Distill, Springer OA, Frontiers, ACL, bioRxiv, etc. |
+| No URL | 23/563 (4.1%) | Paywalled (Elsevier/IEEE) — excluded from sampling |
 
 **Sampling filter:** Papers without any download URL (`arxiv_id` or `open_access_url`) are automatically excluded from the literature search candidate pool. They remain in the graph for topology/statistics but will never be selected as seed, forward, or backward papers. See `_has_download_url()` in `sampling.py`.
 
