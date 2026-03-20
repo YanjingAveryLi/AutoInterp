@@ -38,7 +38,7 @@ logs/
 .last_llm.json
 
 # Persona prompts (user-customized; empty templates committed for reference)
-persona_prompts/
+# persona_prompts/  — templates are tracked; uncomment to ignore local edits
 
 # Helper script to be deleted
 rebuild_notebook_from_data.py
