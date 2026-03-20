@@ -30,6 +30,45 @@ from ..core.utils import (
 )
 
 
+def _detect_container_runtime(config: Dict[str, Any]) -> Optional[str]:
+    """
+    Detect which container runtime to use based on config and system availability.
+
+    Reads ``execution.docker.runtime`` (default ``"auto"``).
+    * ``"auto"`` — try ``docker`` first, then ``podman``
+    * ``"docker"`` / ``"podman"`` — check only that binary
+
+    Returns:
+        ``"docker"``, ``"podman"``, or ``None`` if nothing is found.
+    """
+    runtime_pref = (
+        config.get("execution", {}).get("docker", {}).get("runtime", "auto")
+    )
+    if runtime_pref == "auto":
+        for candidate in ("docker", "podman"):
+            if shutil.which(candidate):
+                return candidate
+        return None
+    # Explicit choice
+    if shutil.which(runtime_pref):
+        return runtime_pref
+    return None
+
+
+def _is_selinux_enforcing() -> bool:
+    """Return ``True`` when SELinux is in Enforcing mode (Fedora/RHEL/CentOS).
+
+    Returns ``False`` on non-SELinux systems or when ``getenforce`` is absent.
+    """
+    try:
+        result = subprocess.run(
+            ["getenforce"], capture_output=True, text=True, timeout=5
+        )
+        return result.returncode == 0 and result.stdout.strip() == "Enforcing"
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return False
+
+
 def check_docker_sandbox(config: Dict[str, Any]) -> None:
     """
     Check if Docker is available when sandbox mode is enabled.
@@ -43,20 +82,24 @@ def check_docker_sandbox(config: Dict[str, Any]) -> None:
     if not sandbox_enabled:
         return
 
-    if shutil.which("docker"):
+    runtime = _detect_container_runtime(config)
+    if runtime:
+        # Store resolved runtime so downstream code can use it without re-detecting
+        config.setdefault("execution", {}).setdefault("docker", {})["_resolved_runtime"] = runtime
         return
 
-    # Docker not found — prompt user
+    # No container runtime found — prompt user
     print("\n" + "=" * 60)
-    print("DOCKER NOT FOUND")
+    print("CONTAINER RUNTIME NOT FOUND")
     print("=" * 60)
-    print("Docker is required for sandbox mode but was not found on your system.")
+    print("A container runtime (Docker or Podman) is required for sandbox mode")
+    print("but neither was found on your system.")
     print("Sandbox mode provides security isolation when executing AI-generated code.")
     print()
 
     while True:
         print("What would you like to do?")
-        print("1. Install Docker (get installation instructions)")
+        print("1. Install a container runtime (get installation instructions)")
         print("2. Proceed without sandboxing (disable sandbox mode)")
         print("3. Exit")
         print()
@@ -69,7 +112,7 @@ def check_docker_sandbox(config: Dict[str, Any]) -> None:
 
         if choice == "1":
             _show_docker_installation_instructions()
-            print("\nAfter installing Docker, please restart the AutoInterp system.")
+            print("\nAfter installing Docker or Podman, please restart the AutoInterp system.")
             sys.exit(0)
         elif choice == "2":
             saved = _disable_sandbox_in_file()
@@ -114,62 +157,54 @@ def _disable_sandbox_in_file() -> bool:
 
 
 def _show_docker_installation_instructions():
-    """Display Docker installation instructions for different operating systems."""
+    """Display Docker/Podman installation instructions for different operating systems."""
     import platform
 
     print("\n" + "=" * 60)
-    print("DOCKER INSTALLATION INSTRUCTIONS")
+    print("CONTAINER RUNTIME INSTALLATION INSTRUCTIONS")
     print("=" * 60)
 
     system = platform.system().lower()
 
     if system == "linux":
-        print("For Linux (Ubuntu/Debian):")
-        print("1. Update package index:")
-        print("   sudo apt-get update")
+        print("Option A — Docker (Ubuntu/Debian):")
+        print("   sudo apt-get update && sudo apt-get install docker.io")
+        print("   sudo systemctl start docker && sudo systemctl enable docker")
+        print("   sudo usermod -aG docker $USER  # optional, run without sudo")
         print()
-        print("2. Install Docker:")
-        print("   sudo apt-get install docker.io")
+        print("Option B — Podman (Fedora/RHEL/CentOS):")
+        print("   sudo dnf install podman")
         print()
-        print("3. Start and enable Docker:")
-        print("   sudo systemctl start docker")
-        print("   sudo systemctl enable docker")
+        print("   Ubuntu/Debian:")
+        print("   sudo apt-get update && sudo apt-get install podman")
         print()
-        print("4. Add your user to docker group (optional, to run without sudo):")
-        print("   sudo usermod -aG docker $USER")
-        print("   # Log out and back in for this to take effect")
-        print()
-        print("For other Linux distributions, visit: https://docs.docker.com/engine/install/")
+        print("For other distributions:")
+        print("   Docker:  https://docs.docker.com/engine/install/")
+        print("   Podman:  https://podman.io/docs/installation")
     elif system == "darwin":
-        print("For macOS:")
-        print("1. Download Docker Desktop from:")
-        print("   https://www.docker.com/products/docker-desktop")
-        print()
-        print("2. Install the downloaded .dmg file")
-        print()
-        print("3. Start Docker Desktop from Applications")
-        print()
-        print("Alternative - using Homebrew:")
+        print("Option A — Docker Desktop:")
         print("   brew install --cask docker")
+        print("   # or download from https://www.docker.com/products/docker-desktop")
+        print()
+        print("Option B — Podman:")
+        print("   brew install podman")
+        print("   podman machine init && podman machine start")
     elif system == "windows":
-        print("For Windows:")
-        print("1. Download Docker Desktop from:")
-        print("   https://www.docker.com/products/docker-desktop")
+        print("Option A — Docker Desktop:")
+        print("   Download from https://www.docker.com/products/docker-desktop")
+        print("   Note: requires Windows 10/11 with WSL2 enabled")
         print()
-        print("2. Install the downloaded .exe file")
-        print()
-        print("3. Restart your computer if prompted")
-        print()
-        print("4. Start Docker Desktop")
-        print()
-        print("Note: Docker Desktop requires Windows 10/11 with WSL2 enabled")
+        print("Option B — Podman Desktop:")
+        print("   Download from https://podman-desktop.io/")
     else:
         print(f"For {system}:")
-        print("Please visit https://docs.docker.com/engine/install/ for installation instructions")
+        print("   Docker: https://docs.docker.com/engine/install/")
+        print("   Podman: https://podman.io/docs/installation")
 
     print()
-    print("After installation, verify Docker is working by running:")
-    print("   docker --version")
+    print("After installation, verify your runtime:")
+    print("   docker --version   # or")
+    print("   podman --version")
     print("=" * 60)
 
 class AnalysisExecutor:
@@ -279,32 +314,44 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
             f"(exists={self.requirements_file.exists()})"
         )
         
+        # Resolve container runtime (Docker or Podman)
+        self.container_runtime = (
+            docker_settings.get("_resolved_runtime")
+            or _detect_container_runtime(self.config)
+        )
+        self.is_podman = self.container_runtime == "podman"
+        self.selinux_enforcing = self.is_podman and _is_selinux_enforcing()
+
         if self.sandbox_enabled:
-            if shutil.which("docker"):
-                self.logger.info(f"Docker sandbox enabled using image: {self.docker_image}")
+            if self.container_runtime:
+                self.logger.info(
+                    f"Container sandbox enabled using {self.container_runtime}, image: {self.docker_image}"
+                    + (", SELinux :z mounts active" if self.selinux_enforcing else "")
+                )
             else:
                 # check_docker_sandbox() should have been called earlier;
                 # if we still get here, just disable silently.
-                self.logger.warning("Docker not found — disabling sandbox")
+                self.logger.warning("No container runtime found — disabling sandbox")
                 self.sandbox_enabled = False
 
     def _handle_docker_not_found(self):
         """
-        Handle the case when Docker is not found but sandbox mode is enabled.
-        Provides interactive options to install Docker or proceed without sandboxing.
+        Handle the case when no container runtime is found but sandbox mode is enabled.
+        Provides interactive options to install Docker/Podman or proceed without sandboxing.
         """
         import sys
 
         print("\n" + "="*60)
-        print("DOCKER NOT FOUND")
+        print("CONTAINER RUNTIME NOT FOUND")
         print("="*60)
-        print("Docker is required for sandbox mode but was not found on your system.")
+        print("A container runtime (Docker or Podman) is required for sandbox mode")
+        print("but neither was found on your system.")
         print("Sandbox mode provides security isolation when executing AI-generated code.")
         print()
 
         while True:
             print("What would you like to do?")
-            print("1. Install Docker (get installation instructions)")
+            print("1. Install a container runtime (get installation instructions)")
             print("2. Proceed without sandboxing (disable sandbox mode)")
             print("3. Exit")
             print()
@@ -317,7 +364,7 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
             if choice == "1":
                 self._show_docker_installation_instructions()
-                print("\nAfter installing Docker, please restart the AutoInterp system.")
+                print("\nAfter installing Docker or Podman, please restart the AutoInterp system.")
                 sys.exit(0)
             elif choice == "2":
                 saved = self._disable_sandbox_mode()
@@ -344,65 +391,57 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
     def _show_docker_installation_instructions(self):
         """
-        Display Docker installation instructions for different operating systems.
+        Display Docker/Podman installation instructions for different operating systems.
         """
         import platform
 
         print("\n" + "="*60)
-        print("DOCKER INSTALLATION INSTRUCTIONS")
+        print("CONTAINER RUNTIME INSTALLATION INSTRUCTIONS")
         print("="*60)
 
         system = platform.system().lower()
 
         if system == "linux":
-            print("For Linux (Ubuntu/Debian):")
-            print("1. Update package index:")
-            print("   sudo apt-get update")
+            print("Option A — Docker (Ubuntu/Debian):")
+            print("   sudo apt-get update && sudo apt-get install docker.io")
+            print("   sudo systemctl start docker && sudo systemctl enable docker")
+            print("   sudo usermod -aG docker $USER  # optional, run without sudo")
             print()
-            print("2. Install Docker:")
-            print("   sudo apt-get install docker.io")
+            print("Option B — Podman (Fedora/RHEL/CentOS):")
+            print("   sudo dnf install podman")
             print()
-            print("3. Start and enable Docker:")
-            print("   sudo systemctl start docker")
-            print("   sudo systemctl enable docker")
+            print("   Ubuntu/Debian:")
+            print("   sudo apt-get update && sudo apt-get install podman")
             print()
-            print("4. Add your user to docker group (optional, to run without sudo):")
-            print("   sudo usermod -aG docker $USER")
-            print("   # Log out and back in for this to take effect")
-            print()
-            print("For other Linux distributions, visit: https://docs.docker.com/engine/install/")
+            print("For other distributions:")
+            print("   Docker:  https://docs.docker.com/engine/install/")
+            print("   Podman:  https://podman.io/docs/installation")
 
         elif system == "darwin":  # macOS
-            print("For macOS:")
-            print("1. Download Docker Desktop from:")
-            print("   https://www.docker.com/products/docker-desktop")
-            print()
-            print("2. Install the downloaded .dmg file")
-            print()
-            print("3. Start Docker Desktop from Applications")
-            print()
-            print("Alternative - using Homebrew:")
+            print("Option A — Docker Desktop:")
             print("   brew install --cask docker")
+            print("   # or download from https://www.docker.com/products/docker-desktop")
+            print()
+            print("Option B — Podman:")
+            print("   brew install podman")
+            print("   podman machine init && podman machine start")
 
         elif system == "windows":
-            print("For Windows:")
-            print("1. Download Docker Desktop from:")
-            print("   https://www.docker.com/products/docker-desktop")
+            print("Option A — Docker Desktop:")
+            print("   Download from https://www.docker.com/products/docker-desktop")
+            print("   Note: requires Windows 10/11 with WSL2 enabled")
             print()
-            print("2. Install the downloaded .exe file")
-            print()
-            print("3. Restart your computer if prompted")
-            print()
-            print("4. Start Docker Desktop")
-            print()
-            print("Note: Docker Desktop requires Windows 10/11 with WSL2 enabled")
+            print("Option B — Podman Desktop:")
+            print("   Download from https://podman-desktop.io/")
         else:
             print(f"For {system}:")
-            print("Please visit https://docs.docker.com/engine/install/ for installation instructions")
+            print("   Docker: https://docs.docker.com/engine/install/")
+            print("   Podman: https://podman.io/docs/installation")
 
         print()
-        print("After installation, verify Docker is working by running:")
-        print("   docker --version")
+        print("After installation, verify your runtime:")
+        print("   docker --version   # or")
+        print("   podman --version")
         print("="*60)
 
     def _disable_sandbox_mode(self) -> bool:
@@ -862,8 +901,15 @@ if __name__ == "__main__":
         
         volume_flags: List[str] = []
         for volume in sorted(volumes):
+            # On Podman + SELinux enforcing, append :z so the container
+            # gets the correct SELinux label for bind-mounted paths.
+            if self.selinux_enforcing:
+                if volume.endswith(":ro"):
+                    volume = volume + ",z"
+                elif ":" in volume and not volume.endswith(":z"):
+                    volume = volume + ":z"
             volume_flags.extend(["-v", volume])
-        
+
         return volume_flags
     
     def _build_docker_command(self,
@@ -881,17 +927,25 @@ if __name__ == "__main__":
         Returns:
             Tuple of (docker command list, gpu_enabled flag)
         """
-        cmd: List[str] = ["docker", "run", "--rm"]
+        cmd: List[str] = [self.container_runtime, "run", "--rm"]
         cmd.extend(["-w", str(script_dir.resolve())])
-        
+
         # Run as current user when possible to avoid root-owned artifacts
         if hasattr(os, "getuid"):
-            cmd.extend(["--user", f"{os.getuid()}:{os.getgid()}"])
-        
+            if self.is_podman:
+                # Podman: map host UID into the container's user namespace
+                cmd.extend(["--userns=keep-id"])
+            else:
+                cmd.extend(["--user", f"{os.getuid()}:{os.getgid()}"])
+
         gpu_requested = prefer_gpu and (self.docker_use_gpu or bool(os.environ.get("CUDA_VISIBLE_DEVICES")))
         gpu_enabled = False
         if gpu_requested:
-            cmd.extend(["--gpus", "all"])
+            if self.is_podman:
+                # Podman uses CDI (Container Device Interface) for GPU access
+                cmd.extend(["--device", "nvidia.com/gpu=all"])
+            else:
+                cmd.extend(["--gpus", "all"])
             gpu_enabled = True
         
         cmd.extend(self.docker_extra_args)
@@ -927,7 +981,7 @@ if __name__ == "__main__":
         wrapper_path.write_text(wrapper_code, encoding="utf-8")
         
         docker_cmd, gpu_enabled = self._build_docker_command(script_dir, wrapper_name, prefer_gpu=True)
-        self.logger.info(f"Executing {execution_type} script in Docker: {' '.join(docker_cmd)}")
+        self.logger.info(f"Executing {execution_type} script in {self.container_runtime}: {' '.join(docker_cmd)}")
         
         try:
             process = await asyncio.create_subprocess_exec(
@@ -944,10 +998,14 @@ if __name__ == "__main__":
             gpu_error_signatures = [
                 "could not select device driver",
                 "unknown flag: --gpus",
-                "no CUDA-capable device is detected"
+                "no CUDA-capable device is detected",
+                # Podman CDI errors
+                "CDI device",
+                "unresolvable CDI",
+                "nvidia.com/gpu",
             ]
             if return_code != 0 and gpu_enabled and any(sig in stderr for sig in gpu_error_signatures):
-                self.logger.warning("Docker execution failed with GPU enabled, retrying without GPU access")
+                self.logger.warning(f"{self.container_runtime} execution failed with GPU enabled, retrying without GPU access")
                 retry_cmd, _ = self._build_docker_command(script_dir, wrapper_name, prefer_gpu=False)
                 process = await asyncio.create_subprocess_exec(
                     *retry_cmd,

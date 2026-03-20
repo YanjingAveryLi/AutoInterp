@@ -83,6 +83,7 @@ execution:
   existing_venv_path: ""  # Path to existing virtual environment (or use --venv CLI flag)
   fail_on_max_retries: false  # If true, shutdown entire system when max_retries exceeded; if false, continue to next analysis
   docker:
+    runtime: "auto"            # "auto" (try docker then podman), "docker", or "podman"
     image: "python:3.10-slim"  # Default container image for sandbox execution
     use_gpu: false             # Set true to pass host GPUs into the container (requires nvidia-container-runtime)
     cache_dir: "~/.autointerp/docker_cache"  # Persistent cache for installed packages
