@@ -74,7 +74,12 @@ prompt_template: |
 
   ## Important Notes
   - You are running on a consumer GPU. The model "{model_name}" should fit comfortably.
-  - **Recommended models:** For standard text analysis, use "{model_name}". For tasks requiring vision (image understanding, chart reading), use "{vision_model}". For tasks requiring advanced reasoning (math, logic, complex multi-step inference), use "{reasoning_model}". Choose the model that best fits your analysis plan. You may use multiple models in a single analysis if needed.
+  - **Recommended models — choose the right variant for your analysis:**
+    - **Text (instruct/chat):** `{model_name}` — use for behavioral experiments, prompt-response studies, chat-format probing, instruction-following analysis
+    - **Text (base/pretrained):** `{base_model}` — use for representation analysis, activation probing, weight inspection, logit lens, SAE/feature analysis, next-token prediction studies, and any experiment where instruction tuning could confound results
+    - **Vision (VLM):** `{vision_model}` — use for tasks requiring image understanding, chart reading, multimodal analysis
+    - **Reasoning:** `{reasoning_model}` — use for tasks requiring advanced reasoning, math, logic, complex multi-step inference
+    Choose the model that best fits your analysis plan. When designing prompts, be mindful of whether you are using a base model or an instruction-tuned model. You may use multiple models in a single analysis if needed.
   - Do NOT train or fine-tune the model. Only observe activations, weights, logits, and behaviors.
   - Do NOT download external datasets. Generate any needed test inputs programmatically.
   - Your working directory is analysis_{n}/. Write all output files here.

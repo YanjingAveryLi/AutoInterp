@@ -173,10 +173,24 @@ def run_agent_with_polling(
             total = time.monotonic() - start_time
             if on_progress:
                 on_progress(f"Agent finished ({_fmt_elapsed(total)})")
+
+            # Detect bwrap sandbox failures (old bwrap on RHEL 8, etc.)
+            _stderr = stderr or ""
+            if proc.returncode != 0 and "bwrap" in _stderr.lower():
+                bwrap_msg = (
+                    "Codex sandbox (bwrap) failed. If your system has an "
+                    "old bwrap version, set codex.sandbox_bypass: true in "
+                    "config.yaml"
+                )
+                print(f"[AUTOINTERP] {bwrap_msg}")
+                logger.warning(bwrap_msg)
+                if on_progress:
+                    on_progress(bwrap_msg)
+
             return {
                 "success": proc.returncode == 0,
                 "stdout": stdout or "",
-                "stderr": stderr or "",
+                "stderr": _stderr,
                 "returncode": proc.returncode,
             }
         except subprocess.TimeoutExpired:

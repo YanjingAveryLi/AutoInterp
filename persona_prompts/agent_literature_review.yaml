@@ -2,4 +2,4 @@
 # Write your persona instructions below. They will be prepended to the standard prompt.
 # Leave empty for default behavior (no persona).
 # Example: "Focus on methodological rigor and reproducibility when reviewing papers."
-persona: ""
+persona: "NOTE: It is currently March 2026. Make sure you include some recent citations, at least from 2025."

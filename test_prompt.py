@@ -308,6 +308,7 @@ def run_stage(
     provider: str,
     model: str,
     timeout: int,
+    sandbox_bypass: bool = False,
 ) -> Dict[str, Any]:
     """Dispatch to the appropriate agent runner."""
     if stage == "questions":
@@ -317,6 +318,7 @@ def run_stage(
             prompt_text=prompt_text,
             timeout=timeout,
             model=model,
+            sandbox_bypass=sandbox_bypass,
         )
     elif stage == "litreview":
         literature_dir = run_dir / "literature"
@@ -326,6 +328,7 @@ def run_stage(
             prompt_text=prompt_text,
             timeout=timeout,
             model=model,
+            sandbox_bypass=sandbox_bypass,
         )
     elif stage == "viz":
         viz_dir = run_dir / "visualizations"
@@ -335,6 +338,7 @@ def run_stage(
             prompt_text=prompt_text,
             timeout=timeout,
             model=model,
+            sandbox_bypass=sandbox_bypass,
         )
     elif stage == "report":
         return run_report_agent(
@@ -343,6 +347,7 @@ def run_stage(
             prompt_text=prompt_text,
             timeout=timeout,
             model=model,
+            sandbox_bypass=sandbox_bypass,
         )
     elif stage == "notebook":
         return run_notebook_agent(
@@ -351,6 +356,7 @@ def run_stage(
             prompt_text=prompt_text,
             timeout=timeout,
             model=model,
+            sandbox_bypass=sandbox_bypass,
         )
     else:
         raise ValueError(f"Unknown stage: {stage}")
@@ -544,7 +550,18 @@ def main() -> None:
     print(f"Timeout: {timeout}s")
     print()
 
-    result = run_stage(stage, run_dir, prompt_text, provider, model, timeout)
+    # Load codex sandbox_bypass from config.yaml
+    _cfg_path = Path(__file__).resolve().parent / "config.yaml"
+    _codex_sb = False
+    if _cfg_path.exists():
+        try:
+            with open(_cfg_path) as _f:
+                _cfg = yaml.safe_load(_f) or {}
+            _codex_sb = _cfg.get("codex", {}).get("sandbox_bypass", False)
+        except Exception:
+            pass
+
+    result = run_stage(stage, run_dir, prompt_text, provider, model, timeout, sandbox_bypass=_codex_sb)
     print_summary(stage, run_dir, result)
 
 

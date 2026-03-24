@@ -273,6 +273,7 @@ OPTIONS_SETTINGS = [
     {"key": "notebook.enabled",               "label": "Notebook generation",               "type": "bool", "help": "Generate Jupyter notebook from finalized repo"},
     {"key": "literature_review.enabled",       "label": "Literature review",                 "type": "bool", "help": "Run arXiv literature review after question prioritization"},
     {"key": "literature_review.lit_count",    "label": "Number of papers read in lit. review", "type": "int", "help": "Target number of papers to find and summarize"},
+    {"key": "codex.sandbox_bypass",           "label": "Codex sandbox bypass (Docker/containers)", "type": "bool", "help": "Bypass bwrap sandbox for old Linux / containers / SLURM"},
 ]
 
 
@@ -1767,6 +1768,7 @@ async def iterative_analysis_agent(
     model_cfg = config.get("model", {})
     model_name = model_cfg.get("name", "meta-llama/Llama-3.2-3B-Instruct")
     model_path = model_cfg.get("tokenizer", model_name)
+    base_model = model_cfg.get("base_model", "")
     vision_model = model_cfg.get("vision_model", "")
     reasoning_model = model_cfg.get("reasoning_model", "")
 
@@ -1812,6 +1814,7 @@ async def iterative_analysis_agent(
             model_path=model_path,
             vision_model=vision_model,
             reasoning_model=reasoning_model,
+            base_model=base_model,
         )
 
         # Run agent
@@ -1822,6 +1825,7 @@ async def iterative_analysis_agent(
             _iter = iteration  # capture for closure
             def _analysis_progress_cb(msg, _iter=_iter):
                 pipeline_ui.step_progress("iterative_analysis", f"[Iter {_iter}] {msg}")
+        _codex_sb = config.get("codex", {}).get("sandbox_bypass", False)
         agent_result = run_analysis_agent(
             provider=provider,
             analysis_dir=iter_dir,
@@ -1830,6 +1834,7 @@ async def iterative_analysis_agent(
             on_progress=_analysis_progress_cb,
             iteration_n=iteration,
             model=llm_config.get("model", ""),
+            sandbox_bypass=_codex_sb,
         )
         _agent_duration = _time.time() - _agent_start
 
@@ -2817,6 +2822,7 @@ async def generate_report(
                 def _viz_progress_cb(msg):
                     pipeline_ui.step_progress("visualization", msg)
 
+            _codex_sb = config.get("codex", {}).get("sandbox_bypass", False)
             _viz_agent_result = run_visualization_agent(
                 provider=_provider,
                 viz_dir=viz_dir,
@@ -2824,6 +2830,7 @@ async def generate_report(
                 timeout=_viz_agent_timeout,
                 on_progress=_viz_progress_cb,
                 model=config.get("llm", {}).get("model", ""),
+                sandbox_bypass=_codex_sb,
             )
 
             visualizations = read_visualization_outputs(viz_dir)
@@ -2909,6 +2916,7 @@ async def generate_report(
                 def _report_progress_cb(msg):
                     pipeline_ui.step_progress("report_generation", msg)
 
+            _codex_sb = config.get("codex", {}).get("sandbox_bypass", False)
             agent_result = run_report_agent(
                 provider=_provider,
                 project_dir=path_resolver.get_project_dir(),
@@ -2916,6 +2924,7 @@ async def generate_report(
                 timeout=agent_timeout,
                 on_progress=_report_progress_cb,
                 model=config.get("llm", {}).get("model", ""),
+                sandbox_bypass=_codex_sb,
             )
 
             outputs = read_report_outputs(path_resolver.get_project_dir())
@@ -3098,6 +3107,7 @@ async def streamlined_pipeline(framework: Dict[str, Any]) -> Dict[str, Any]:
         print("="*80 + "\n")
 
     use_literature_search_question = False
+    codex_sandbox_bypass = config.get("codex", {}).get("sandbox_bypass", False)
 
     try:
         # 1. Question Generation (via literature search or direct LLM)
@@ -3174,6 +3184,7 @@ async def streamlined_pipeline(framework: Dict[str, Any]) -> Dict[str, Any]:
                                 timeout=agent_timeout,
                                 on_progress=_qgen_progress_cb,
                                 model=llm_config.get("model", ""),
+                                sandbox_bypass=codex_sandbox_bypass,
                             ) or ""
 
                         # Fallback to LLM API call if agent didn't produce output
@@ -3281,6 +3292,7 @@ async def streamlined_pipeline(framework: Dict[str, Any]) -> Dict[str, Any]:
                         timeout=_q_timeout,
                         on_progress=_q_progress_cb,
                         model=_q_model,
+                        sandbox_bypass=codex_sandbox_bypass,
                     )
 
                     _q_outputs = read_questions_outputs(path_resolver.get_project_dir())
@@ -3397,6 +3409,7 @@ async def streamlined_pipeline(framework: Dict[str, Any]) -> Dict[str, Any]:
                         timeout=_pri_timeout,
                         on_progress=_pri_progress_cb,
                         model=_pri_model,
+                        sandbox_bypass=codex_sandbox_bypass,
                     )
 
                     _pri_outputs = read_prioritizer_outputs(path_resolver.get_project_dir())
@@ -3493,6 +3506,7 @@ async def streamlined_pipeline(framework: Dict[str, Any]) -> Dict[str, Any]:
                         timeout=_lr_timeout,
                         on_progress=_lr_progress,
                         model=config.get("llm", {}).get("model", ""),
+                        sandbox_bypass=codex_sandbox_bypass,
                     )
                     _lr_duration = time.time() - _lr_start
 
@@ -3704,6 +3718,7 @@ async def streamlined_pipeline(framework: Dict[str, Any]) -> Dict[str, Any]:
                             round_number=_ac_round,
                             on_progress=_ac_progress_cb,
                             model=config.get("llm", {}).get("model", ""),
+                            sandbox_bypass=codex_sandbox_bypass,
                         )
 
                         _ac_outputs = read_autocritique_outputs(path_resolver.get_project_dir(), round_number=_ac_round)
@@ -3812,6 +3827,7 @@ async def streamlined_pipeline(framework: Dict[str, Any]) -> Dict[str, Any]:
                                 recommendation_idx=_rec_idx,
                                 on_progress=_rev_progress_cb,
                                 model=config.get("llm", {}).get("model", ""),
+                                sandbox_bypass=codex_sandbox_bypass,
                             )
 
                             _rev_out = read_revision_outputs(
@@ -3869,6 +3885,7 @@ async def streamlined_pipeline(framework: Dict[str, Any]) -> Dict[str, Any]:
                             round_number=_ac_round,
                             on_progress=_rr_progress_cb,
                             model=config.get("llm", {}).get("model", ""),
+                            sandbox_bypass=codex_sandbox_bypass,
                         )
 
                         _rr_outputs = read_report_revision_outputs(
@@ -4014,6 +4031,7 @@ async def streamlined_pipeline(framework: Dict[str, Any]) -> Dict[str, Any]:
                         timeout=_repo_timeout,
                         on_progress=_repo_progress_cb,
                         model=config.get("llm", {}).get("model", ""),
+                        sandbox_bypass=codex_sandbox_bypass,
                     )
 
                     _repo_outputs = read_repo_outputs(path_resolver.get_project_dir())
@@ -4093,6 +4111,7 @@ async def streamlined_pipeline(framework: Dict[str, Any]) -> Dict[str, Any]:
                         timeout=_nb_timeout,
                         on_progress=_nb_progress_cb,
                         model=config.get("llm", {}).get("model", ""),
+                        sandbox_bypass=codex_sandbox_bypass,
                     )
 
                     _nb_outputs = read_notebook_outputs(path_resolver.get_project_dir())

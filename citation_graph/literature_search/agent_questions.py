@@ -27,7 +27,7 @@ def _build_prompt(pdf_dir: Path, template: str) -> str:
     )
 
 
-def _get_agent_command(provider: str, prompt_text: str, literature_dir: Path, model: str = ""):
+def _get_agent_command(provider: str, prompt_text: str, literature_dir: Path, model: str = "", sandbox_bypass: bool = False):
     """
     Return (cmd_list, subprocess_kwargs) for the selected provider's CLI agent,
     or None if the provider doesn't have a supported CLI agent.
@@ -51,7 +51,10 @@ def _get_agent_command(provider: str, prompt_text: str, literature_dir: Path, mo
         cli = "codex"
         if not shutil.which(cli):
             return None
-        cmd = [cli, "exec", "-s", "workspace-write"]
+        if sandbox_bypass:
+            cmd = [cli, "exec", "--dangerously-bypass-approvals-and-sandbox"]
+        else:
+            cmd = [cli, "exec", "-s", "workspace-write"]
         if model:
             cmd += ["-m", model]
         cmd.append(prompt_text)
@@ -67,6 +70,7 @@ def run_agent_question_generation(
     timeout: int = 600,
     on_progress: Optional[Callable[[str], None]] = None,
     model: str = "",
+    sandbox_bypass: bool = False,
 ) -> Optional[str]:
     """
     Invoke a CLI agent (claude or codex) to read PDFs and write Research_Questions.txt.
@@ -84,7 +88,7 @@ def run_agent_question_generation(
 
     prompt_text = _build_prompt(pdf_dir, prompt_template)
 
-    result = _get_agent_command(provider, prompt_text, literature_dir, model=model)
+    result = _get_agent_command(provider, prompt_text, literature_dir, model=model, sandbox_bypass=sandbox_bypass)
     if result is None:
         cli_name = "claude" if provider.lower() == "anthropic" else "codex"
         logger.warning(

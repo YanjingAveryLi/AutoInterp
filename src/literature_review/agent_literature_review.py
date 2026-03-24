@@ -29,6 +29,7 @@ def _get_literature_review_agent_command(
     prompt_text: str,
     literature_dir: Path,
     model: str = "",
+    sandbox_bypass: bool = False,
 ) -> Optional[Tuple[List[str], Dict[str, Any]]]:
     """
     Return ``(cmd_list, subprocess_kwargs)`` for the selected provider's CLI
@@ -50,7 +51,10 @@ def _get_literature_review_agent_command(
         cli = "codex"
         if not shutil.which(cli):
             return None
-        cmd = [cli, "exec", "-s", "workspace-write"]
+        if sandbox_bypass:
+            cmd = [cli, "exec", "--dangerously-bypass-approvals-and-sandbox"]
+        else:
+            cmd = [cli, "exec", "-s", "workspace-write"]
         if model:
             cmd += ["-m", model]
         cmd.append(prompt_text)
@@ -89,6 +93,7 @@ def run_literature_review_agent(
     timeout: int = 1800,
     on_progress: Optional[Callable[[str], None]] = None,
     model: str = "",
+    sandbox_bypass: bool = False,
 ) -> Dict[str, Any]:
     """
     Launch the CLI agent subprocess for literature review and return the result.
@@ -96,7 +101,8 @@ def run_literature_review_agent(
     Returns ``{"success": bool, "stdout": str, "stderr": str, "returncode": int}``.
     """
     result = _get_literature_review_agent_command(
-        provider, prompt_text, literature_dir, model=model
+        provider, prompt_text, literature_dir, model=model,
+        sandbox_bypass=sandbox_bypass
     )
     if result is None:
         cli_name = "claude" if (provider or "").lower() == "anthropic" else "codex"

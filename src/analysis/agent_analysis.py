@@ -70,6 +70,7 @@ def _get_analysis_agent_command(
     prompt_text: str,
     analysis_dir: Path,
     model: str = "",
+    sandbox_bypass: bool = False,
 ) -> Optional[Tuple[List[str], Dict[str, Any]]]:
     """
     Return ``(cmd_list, subprocess_kwargs)`` for the selected provider's CLI
@@ -91,7 +92,10 @@ def _get_analysis_agent_command(
         cli = "codex"
         if not shutil.which(cli):
             return None
-        cmd = [cli, "exec", "-s", "workspace-write"]
+        if sandbox_bypass:
+            cmd = [cli, "exec", "--dangerously-bypass-approvals-and-sandbox"]
+        else:
+            cmd = [cli, "exec", "-s", "workspace-write"]
         if model:
             cmd += ["-m", model]
         cmd.append(prompt_text)
@@ -112,14 +116,16 @@ def _build_analysis_prompt(
     model_path: str,
     vision_model: str = "",
     reasoning_model: str = "",
+    base_model: str = "",
 ) -> str:
     """
     Substitute placeholders in the prompt template.
 
     Placeholders handled:
       {n}  — current iteration number
-      {model_name}  — HuggingFace model name
+      {model_name}  — HuggingFace model name (instruct variant)
       {model_path}  — HuggingFace model path (same as name for HF models)
+      {base_model}  — HuggingFace base (pretrained) model name
       {vision_model}  — HuggingFace model for vision tasks
       {reasoning_model}  — HuggingFace model for reasoning tasks
       {prior_analyses_listing}  — directory listing of prior iterations
@@ -169,6 +175,7 @@ def _build_analysis_prompt(
     prompt = prompt_template.replace("{n}", str(iteration_n))
     prompt = prompt.replace("{model_name}", model_name)
     prompt = prompt.replace("{model_path}", model_path)
+    prompt = prompt.replace("{base_model}", base_model or model_name)
     prompt = prompt.replace("{vision_model}", vision_model)
     prompt = prompt.replace("{reasoning_model}", reasoning_model)
     prompt = prompt.replace("{prior_analyses_listing}", prior_listing)
@@ -189,13 +196,14 @@ def run_analysis_agent(
     on_progress: Optional[Callable[[str], None]] = None,
     iteration_n: int = 1,
     model: str = "",
+    sandbox_bypass: bool = False,
 ) -> Dict[str, Any]:
     """
     Launch the CLI agent subprocess and return the result.
 
     Returns ``{"success": bool, "stdout": str, "stderr": str, "returncode": int}``.
     """
-    result = _get_analysis_agent_command(provider, prompt_text, analysis_dir, model=model)
+    result = _get_analysis_agent_command(provider, prompt_text, analysis_dir, model=model, sandbox_bypass=sandbox_bypass)
     if result is None:
         cli_name = "claude" if (provider or "").lower() == "anthropic" else "codex"
         logger.warning(

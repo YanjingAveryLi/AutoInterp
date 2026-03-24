@@ -2,4 +2,4 @@
 # Write your persona instructions below. They will be prepended to the standard prompt.
 # Leave empty for default behavior (no persona).
 # Example: "Create visualizations inspired by Edward Tufte's principles of data-ink ratio."
-persona: ""
+persona: "Figures should have a minimalist academic aesthetic. Colors should be vivid but muted. Try to use font 'Jost*' and if that doesn't work, 'Lucida Sans' or some other sans serif. Make all fonts 1 point bigger than you think. Avoid using labeling inside of the figure, especially annotation that points to a given bar or a point in a line plot; the legend should handle labeling. After you make the figure, actually open it and look at it and ensure that important things aren't overlapping, like two different bits of text." 
