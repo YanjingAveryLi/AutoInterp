@@ -2,6 +2,7 @@
 
 import json
 import os
+from typing import Tuple
 
 import networkx as nx
 
@@ -38,7 +39,7 @@ def save_graph(G: nx.DiGraph, completed_waves: int,
     print(f"  Saved graph state ({len(nodes)} nodes, {len(edges)} edges) to {path}")
 
 
-def load_graph(path: str = GRAPH_STATE_PATH) -> tuple[nx.DiGraph, int]:
+def load_graph(path: str = GRAPH_STATE_PATH) -> Tuple[nx.DiGraph, int]:
     """Deserialize graph state. Returns (graph, completed_waves)."""
     if not os.path.exists(path):
         raise FileNotFoundError(f"No saved state at {path}")

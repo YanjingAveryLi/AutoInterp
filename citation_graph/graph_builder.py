@@ -1,7 +1,7 @@
 """Wave expansion algorithm for building the citation graph."""
 
 from collections import defaultdict
-from typing import Optional
+from typing import Optional, Set
 
 import networkx as nx
 
@@ -89,7 +89,7 @@ def expand_wave(client: SemanticScholarClient, G: nx.DiGraph, wave_num: int,
                 max_candidates: int = DEFAULT_MAX_CANDIDATES_PER_WAVE,
                 year_min: int = DEFAULT_YEAR_MIN,
                 year_max: int = DEFAULT_YEAR_MAX,
-                min_citations: int = DEFAULT_MIN_CITATIONS) -> set[str]:
+                min_citations: int = DEFAULT_MIN_CITATIONS) -> Set[str]:
     """Expand the graph by one wave. Returns the set of newly added paper IDs."""
 
     # Identify the frontier: papers added in the previous wave

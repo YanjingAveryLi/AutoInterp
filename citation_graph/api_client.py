@@ -142,17 +142,17 @@ class SemanticScholarClient:
 
     # --- Citations & references ---
 
-    def get_citations(self, paper_id: str, fields: str = CITATION_FIELDS) -> list[dict]:
+    def get_citations(self, paper_id: str, fields: str = CITATION_FIELDS) -> List[Dict]:
         """Fetch all papers that cite the given paper (paginated)."""
         return self._paginate(f"{S2_API_BASE}/paper/{paper_id}/citations",
                               fields=fields, result_key="citingPaper")
 
-    def get_references(self, paper_id: str, fields: str = REFERENCE_FIELDS) -> list[dict]:
+    def get_references(self, paper_id: str, fields: str = REFERENCE_FIELDS) -> List[Dict]:
         """Fetch all papers referenced by the given paper (paginated)."""
         return self._paginate(f"{S2_API_BASE}/paper/{paper_id}/references",
                               fields=fields, result_key="citedPaper")
 
-    def _paginate(self, url: str, fields: str, result_key: str) -> list[dict]:
+    def _paginate(self, url: str, fields: str, result_key: str) -> List[Dict]:
         all_results = []
         offset = 0
         while True:
@@ -176,7 +176,7 @@ class SemanticScholarClient:
 
     # --- Batch endpoint ---
 
-    def get_papers_batch(self, paper_ids: list[str], fields: str = PAPER_FIELDS) -> list[dict]:
+    def get_papers_batch(self, paper_ids: List[str], fields: str = PAPER_FIELDS) -> List[Dict]:
         """Fetch metadata for many papers efficiently via POST /paper/batch."""
         results = []
         for i in range(0, len(paper_ids), BATCH_CHUNK_SIZE):
