@@ -215,6 +215,9 @@ def run_analysis_agent(
 
     cmd, kwargs = result
     cwd = Path(kwargs["cwd"])
+
+    os.environ.setdefault("CLAUDE_CODE_MAX_OUTPUT_TOKENS", "64000")
+
     logger.debug("Running analysis agent: %s (timeout=%ds)", cmd[0], timeout)
     print(f"[AUTOINTERP] Running {cmd[0]} analysis agent (timeout={timeout}s)...")
 

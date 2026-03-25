@@ -4,6 +4,7 @@ research report autonomously within one subprocess invocation.
 """
 
 import logging
+import os
 import shutil
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -110,6 +111,8 @@ def run_report_agent(
     cwd = Path(kwargs["cwd"])
     reports_dir = cwd / "reports"
     reports_dir.mkdir(parents=True, exist_ok=True)
+
+    os.environ.setdefault("CLAUDE_CODE_MAX_OUTPUT_TOKENS", "64000")
 
     logger.debug("Running report agent: %s (timeout=%ds)", cmd[0], timeout)
     print(f"[AUTOINTERP] Running {cmd[0]} report agent (timeout={timeout}s)...")

@@ -4,6 +4,7 @@ work into the research report after per-recommendation revision agents finish.
 """
 
 import logging
+import os
 import shutil
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -117,6 +118,8 @@ def run_report_revision_agent(
     cwd = Path(kwargs["cwd"])
     reports_dir = cwd / "reports"
     reports_dir.mkdir(parents=True, exist_ok=True)
+
+    os.environ.setdefault("CLAUDE_CODE_MAX_OUTPUT_TOKENS", "64000")
 
     logger.debug(
         "Running report revision agent round %d: %s (timeout=%ds)",
