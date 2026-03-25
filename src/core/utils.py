@@ -208,7 +208,34 @@ def load_yaml(file_path: Union[str, Path]) -> Dict[str, Any]:
             raise yaml.YAMLError(f"Error parsing YAML file {file_path}: {e}")
 
 
-        
+def load_config(config_path: Union[str, Path, None] = None) -> Dict[str, Any]:
+    """
+    Load config.yaml and automatically merge config.local.yaml on top of it
+    (if the local file exists).  An explicit ``config_path`` override is merged
+    last, taking highest precedence.
+
+    Merge strategy: dicts are shallow-merged (local keys win); all other types
+    are replaced outright.
+    """
+    base = Path(config_path) if config_path else Path(__file__).resolve().parents[2] / "config.yaml"
+    config = load_yaml(base)
+
+    def _merge(base_cfg: Dict[str, Any], overrides: Dict[str, Any]) -> Dict[str, Any]:
+        for key, value in overrides.items():
+            if isinstance(value, dict) and isinstance(base_cfg.get(key), dict):
+                base_cfg[key] = {**base_cfg[key], **value}
+            else:
+                base_cfg[key] = value
+        return base_cfg
+
+    local_path = base.parent / "config.local.yaml"
+    if local_path.exists():
+        local_cfg = load_yaml(local_path)
+        config = _merge(config, local_cfg)
+
+    return config
+
+
 def load_txt(file_path: Union[str, Path]) -> Dict[str, Any]:
     """
     Load dictionary from a TXT file created by save_txt.

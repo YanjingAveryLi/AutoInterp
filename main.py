@@ -27,7 +27,7 @@ try:
 except ImportError:
     pass  # dotenv is optional
 
-from AutoInterp.src.core.utils import setup_logging, load_yaml, ensure_directory, get_timestamp, load_prompts, PathResolver, log_to_comprehensive_log, clean_code_content, PACKAGE_ROOT
+from AutoInterp.src.core.utils import setup_logging, load_yaml, load_config, ensure_directory, get_timestamp, load_prompts, PathResolver, log_to_comprehensive_log, clean_code_content, PACKAGE_ROOT
 from AutoInterp.src.core.llm_interface import LLMInterface
 from AutoInterp.src.questions.question_manager import QuestionManager
 from AutoInterp.src.analysis.analysis_generator import AnalysisGenerator
@@ -584,20 +584,8 @@ async def initialize_framework(
     """
     package_root = Path(__file__).resolve().parent
 
-    # Load global configuration
-    config = load_yaml(Path(__file__).parent / "config.yaml")
-    
-    # Load override configuration if provided
-    if config_path:
-        override_config = load_yaml(config_path)
-        # Merge configurations (override config takes precedence)
-        for key, value in override_config.items():
-            if isinstance(value, dict) and key in config and isinstance(config[key], dict):
-                # Deep merge for dictionary values
-                config[key] = {**config[key], **value}
-            else:
-                # Simple override for other values
-                config[key] = value
+    # Load global configuration (auto-merges config.local.yaml if present)
+    config = load_config(config_path if config_path else None)
 
     # Resolve the projects directory, defaulting to the package projects folder
     paths_config = config.setdefault("paths", {})
@@ -4250,8 +4238,85 @@ def build_argument_parser() -> argparse.ArgumentParser:
     ctx_parser.add_argument("--no-llm", action="store_true", help="Do not generate research question")
     ctx_parser.set_defaults(command="literature-search")
 
+    # publish: upload a completed project to Future Science
+    pub_parser = subparsers.add_parser("publish", help="Upload a completed project to Future Science")
+    pub_parser.add_argument("--project", required=True,
+                            help="Path to the completed project directory (or project ID under projects/)")
+    pub_parser.add_argument("--api-key", default=None,
+                            help="Future Science API key (falls back to FUTURE_SCIENCE_API_KEY env var or config)")
+    pub_parser.add_argument("--initiative-id", default="",
+                            help="documentId of the target initiative on Future Science")
+    pub_parser.add_argument("--contributor-email", default="",
+                            help="Email address of the submitting contributor")
+    pub_parser.add_argument("--author-first-name", default="AutoInterp",
+                            help="Author first name (default: AutoInterp)")
+    pub_parser.add_argument("--author-last-name", default="Agent",
+                            help="Author last name (default: Agent)")
+    pub_parser.add_argument("--author-institution", default="AutoInterp",
+                            help="Author institution (default: AutoInterp)")
+    pub_parser.add_argument("--author-email", default="",
+                            help="Author email address")
+    pub_parser.add_argument("--dry-run", action="store_true",
+                            help="Print what would be submitted without actually POSTing")
+    pub_parser.set_defaults(command="publish")
+
     parser.set_defaults(command="run")
     return parser
+
+
+def run_publish_cmd(args: argparse.Namespace) -> None:
+    """Upload a completed project to Future Science."""
+    from AutoInterp.src.publish.future_science import publish_project
+
+    project_path = Path(args.project)
+    if not project_path.is_absolute():
+        # Try resolving relative to projects/ directory
+        candidate = PACKAGE_ROOT / "projects" / args.project
+        if candidate.is_dir():
+            project_path = candidate
+        else:
+            project_path = Path(args.project).resolve()
+
+    # Resolve settings: flag > env var > config (config.local.yaml merged automatically)
+    fs_cfg: Dict[str, Any] = load_config().get("future_science", {})
+
+    api_key = args.api_key or os.environ.get("FUTURE_SCIENCE_API_KEY", "") or fs_cfg.get("api_key", "")
+    if not api_key and not args.dry_run:
+        print("[AUTOINTERP] ERROR: No API key provided. Use --api-key, set FUTURE_SCIENCE_API_KEY, "
+              "or add future_science.api_key to config.yaml")
+        sys.exit(1)
+
+    author_first_name = args.author_first_name or fs_cfg.get("author_first_name", "") or "AutoInterp"
+    author_last_name = args.author_last_name or fs_cfg.get("author_last_name", "") or "Agent"
+    author_institution = args.author_institution or fs_cfg.get("author_institution", "") or "AutoInterp"
+
+    try:
+        result = publish_project(
+            project_dir=project_path,
+            api_key=api_key or "",
+            initiative_id=args.initiative_id,
+            contributor_email=args.contributor_email,
+            author_first_name=author_first_name,
+            author_last_name=author_last_name,
+            author_institution=author_institution,
+            author_email=args.author_email,
+            dry_run=args.dry_run,
+        )
+    except FileNotFoundError as e:
+        print(f"[AUTOINTERP] ERROR: {e}")
+        sys.exit(1)
+    except RuntimeError as e:
+        print(f"[AUTOINTERP] Submission failed: {e}")
+        sys.exit(1)
+
+    if args.dry_run:
+        print("[AUTOINTERP] Dry run complete — no submission made.")
+    else:
+        doc_id = result.get("documentId", "")
+        title = result.get("title", "")
+        print(f"[AUTOINTERP] Submitted successfully!")
+        print(f"  Title:      {title}")
+        print(f"  documentId: {doc_id}")
 
 
 def run_literature_search_cmd(args: argparse.Namespace) -> None:
@@ -4583,6 +4648,15 @@ def main(argv: Optional[List[str]] = None) -> None:
         except Exception as e:
             import traceback
             print(f"[AUTOINTERP] Literature search failed: {e}")
+            traceback.print_exc()
+            sys.exit(1)
+        return
+    if command == "publish":
+        try:
+            run_publish_cmd(args)
+        except Exception as e:
+            import traceback
+            print(f"[AUTOINTERP] Publish failed: {e}")
             traceback.print_exc()
             sys.exit(1)
         return

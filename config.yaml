@@ -129,6 +129,15 @@ repo:
   use_agent: true             # Use CLI agent (claude/codex) for repo assembly
   agent_timeout: 4200         # Subprocess timeout in seconds for repo agent
 
+# Future Science submission settings
+future_science:
+  api_key: ""               # API key — can also be set via FUTURE_SCIENCE_API_KEY env var
+  initiative_id: ""         # documentId of the target initiative to submit to
+  contributor_email: ""     # Email of the submitting contributor
+  author_first_name: ""     # Default author first name (override in config.local.yaml)
+  author_last_name: ""      # Default author last name (override in config.local.yaml)
+  author_institution: ""    # Default author institution (override in config.local.yaml)
+
 # Notebook generation settings — create executable Jupyter notebook from repo
 notebook:
   enabled: true               # Generate Jupyter notebook after repo assembly
