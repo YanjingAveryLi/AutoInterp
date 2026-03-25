@@ -4,6 +4,7 @@ executable Jupyter notebook from the finalized repo/ directory.
 """
 
 import logging
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -158,6 +159,10 @@ def run_notebook_agent(
     # Ensure notebooks/ exists
     notebooks_dir = cwd / "notebooks"
     notebooks_dir.mkdir(parents=True, exist_ok=True)
+
+    # Notebook JSON can exceed the default 32K output-token cap — raise it to 64K
+    # so that large notebooks aren't silently truncated and the agent doesn't fail.
+    os.environ.setdefault("CLAUDE_CODE_MAX_OUTPUT_TOKENS", "64000")
 
     logger.debug("Running notebook agent: %s (timeout=%ds)", cmd[0], timeout)
     print(f"[AUTOINTERP] Running {cmd[0]} notebook agent (timeout={timeout}s)...")
